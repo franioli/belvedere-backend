@@ -17,6 +17,9 @@ nohup.out
 .logs/
 _old/
 
+./context/
+CLAUDE.md
+
 # SMB credentials - never commit these!
 smb_credentials.txt
 smb_mount.sh
