@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import PurePosixPath
 
 from django.conf import settings
@@ -11,10 +12,12 @@ from image_index.image_metadata import (
 from image_index.models import Camera, Image
 from image_index.s3_utils import build_s3_client, get_object_bytes
 
-BATCH_SIZE = 500
+BATCH_SIZE = 200
+DEFAULT_WORKERS = 8
 
 
-def extract_image_metadata(s3, bucket, key, filename):
+def _fetch_and_extract(s3, bucket, key, filename):
+    """Fetch image bytes from S3 and extract metadata. Designed to run in a thread."""
     try:
         image_bytes, mime_type = get_object_bytes(s3, bucket, key)
         return extract_image_metadata_from_bytes(
@@ -33,8 +36,54 @@ def extract_image_metadata(s3, bucket, key, filename):
         }
 
 
+_UPDATE_FIELDS = [
+    "camera",
+    "filename",
+    "file_size_bytes",
+    "s3_etag",
+    "s3_last_modified",
+    "datetime",
+    "width_px",
+    "height_px",
+    "mime_type",
+    "exif_data",
+    "rotation",
+    "is_indexed",
+    "updated_at",
+]
+
+
 class Command(BaseCommand):
     help = "Index images from S3 buckets into the Image table"
+
+    def _flush_batch(
+        self,
+        batch: list,
+        batch_size: int,
+        counts: dict,
+        grand_total: dict,
+        dry_run: bool,
+    ) -> None:
+        if not batch or dry_run:
+            batch.clear()
+            return
+
+        n = len(batch)
+        Image.objects.bulk_create(
+            batch,
+            batch_size=batch_size,
+            update_conflicts=True,
+            update_fields=_UPDATE_FIELDS,
+            unique_fields=["bucket", "object_key"],
+        )
+        counts["upserted"] += n
+        grand_total["upserted"] += n
+        self.stdout.write(
+            f"  flushed {n} rows | "
+            f"seen={counts['seen']} matched={counts['matched']} "
+            f"skipped={counts['skipped']} upserted={counts['upserted']}"
+        )
+        batch.clear()
 
     def add_arguments(self, parser):
         parser.add_argument("--camera-id", type=int, help="Index only one camera by ID")
@@ -43,8 +92,19 @@ class Command(BaseCommand):
             "--prefix", type=str, help="Override prefix for selected camera"
         )
         parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Re-fetch and re-index even unchanged objects (ETag match)",
+        )
         parser.add_argument("--limit", type=int)
         parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
+        parser.add_argument(
+            "--workers",
+            type=int,
+            default=DEFAULT_WORKERS,
+            help="Number of parallel threads for S3 fetch + EXIF extraction (default: 8)",
+        )
 
     def handle(self, *args, **options):
         if not settings.S3_ENDPOINT_URL:
@@ -61,10 +121,10 @@ class Command(BaseCommand):
         if not qs.exists():
             raise CommandError("No cameras found for the selected filters")
 
-        total_seen = 0
-        total_matched = 0
-        total_upserted = 0
         batch_size = options["batch_size"]
+        workers = max(1, options["workers"])
+
+        grand_total = {"seen": 0, "matched": 0, "skipped": 0, "upserted": 0}
 
         for camera in qs:
             bucket = options["bucket"] or camera.s3_bucket
@@ -76,8 +136,17 @@ class Command(BaseCommand):
                 prefix = f"{prefix}/"
 
             self.stdout.write(
-                f"Indexing camera={camera.id} name={camera.camera_name} bucket={bucket} prefix={prefix or ''}"
+                f"\nIndexing camera={camera.id} name={camera.camera_name} "
+                f"bucket={bucket} prefix={prefix or ''} workers={workers}"
             )
+
+            # --- Phase 1: load existing ETags from DB to enable skip logic ---
+            existing_etags: dict[str, str | None] = dict(
+                Image.objects.filter(camera=camera, bucket=bucket).values_list(
+                    "object_key", "s3_etag"
+                )
+            )
+            self.stdout.write(f"  {len(existing_etags)} rows already in DB")
 
             paginator = s3.get_paginator("list_objects_v2")
             page_iter = paginator.paginate(
@@ -86,68 +155,92 @@ class Command(BaseCommand):
                 PaginationConfig={"PageSize": 1000},
             )
 
-            batch = []
-            matched_for_camera = 0
-            seen_for_camera = 0
-            upserted_for_camera = 0
+            counts = {"seen": 0, "matched": 0, "skipped": 0, "upserted": 0}
+            batch: list[Image] = []
+            done = False
 
-            def flush_batch():
-                nonlocal batch, total_upserted, upserted_for_camera
-                if not batch or options["dry_run"]:
-                    batch = []
-                    return
+            # --- Phase 2: paginate + parallel fetch ---
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for page_num, page in enumerate(page_iter, start=1):
+                    if done:
+                        break
 
-                Image.objects.bulk_create(
-                    batch,
-                    batch_size=batch_size,
-                    update_conflicts=True,
-                    update_fields=[
-                        "camera",
-                        "filename",
-                        "file_size_bytes",
-                        "s3_etag",
-                        "s3_last_modified",
-                        "datetime",
-                        "width_px",
-                        "height_px",
-                        "mime_type",
-                        "exif_data",
-                        "rotation",
-                        "is_indexed",
-                        "updated_at",
-                    ],
-                    unique_fields=["bucket", "object_key"],
-                )
-                total_upserted += len(batch)
-                upserted_for_camera += len(batch)
-                batch = []
+                    contents = page.get("Contents", [])
+                    counts["seen"] += len(contents)
+                    grand_total["seen"] += len(contents)
 
-            for page in page_iter:
-                for obj in page.get("Contents", []):
-                    total_seen += 1
-                    seen_for_camera += 1
+                    # Classify objects in this page: needs-fetch vs skip
+                    to_fetch: list[tuple[str, str, str | None, int | None, object]] = []
+                    for obj in contents:
+                        key = obj["Key"]
+                        if key.endswith("/") or not key.lower().endswith(
+                            IMAGE_EXTENSIONS
+                        ):
+                            continue
 
-                    key = obj["Key"]
-                    if key.endswith("/"):
+                        counts["matched"] += 1
+                        grand_total["matched"] += 1
+
+                        etag = (obj.get("ETag") or "").strip('"') or None
+                        size = obj.get("Size")
+                        last_modified = obj.get("LastModified")
+                        filename = PurePosixPath(key).name
+
+                        # Skip if ETag matches an existing row (content unchanged)
+                        if (
+                            not options["force"]
+                            and key in existing_etags
+                            and existing_etags[key] == etag
+                        ):
+                            counts["skipped"] += 1
+                            grand_total["skipped"] += 1
+                            continue
+
+                        to_fetch.append((key, filename, etag, size, last_modified))
+
+                        if options["limit"] and counts["matched"] >= options["limit"]:
+                            done = True
+                            break
+
+                    self.stdout.write(
+                        f"  page {page_num}: {len(contents)} objects | "
+                        f"to fetch={len(to_fetch)} | "
+                        f"skipped so far={counts['skipped']}"
+                    )
+
+                    if not to_fetch:
                         continue
-                    if not key.lower().endswith(IMAGE_EXTENSIONS):
-                        continue
-
-                    matched_for_camera += 1
-                    total_matched += 1
-
-                    etag = (obj.get("ETag") or "").strip('"') or None
-                    size = obj.get("Size")
-                    last_modified = obj.get("LastModified")
-                    filename = PurePosixPath(key).name
-
-                    metadata = extract_image_metadata(s3, bucket, key, filename)
 
                     if options["dry_run"]:
-                        self.stdout.write(
-                            f"  DRY RUN {key} | dt={metadata['datetime']} | size={metadata['width_px']}x{metadata['height_px']}"
+                        for key, filename, _etag, _size, _last_modified in to_fetch:
+                            meta = _fetch_and_extract(s3, bucket, key, filename)
+                            self.stdout.write(
+                                f"  DRY RUN {key} | "
+                                f"dt={meta['datetime']} | "
+                                f"size={meta['width_px']}x{meta['height_px']}"
+                            )
+                        continue
+
+                    # Submit all fetches for this page in parallel
+                    futures = {
+                        pool.submit(_fetch_and_extract, s3, bucket, key, filename): (
+                            key,
+                            filename,
+                            etag,
+                            size,
+                            last_modified,
                         )
-                    else:
+                        for key, filename, etag, size, last_modified in to_fetch
+                    }
+
+                    for future in as_completed(futures):
+                        key, filename, etag, size, last_modified = futures[future]
+                        try:
+                            meta = future.result()
+                        except Exception as exc:
+                            self.stderr.write(f"  ERROR {key}: {exc}")
+                            continue
+
                         batch.append(
                             Image(
                                 camera=camera,
@@ -157,34 +250,43 @@ class Command(BaseCommand):
                                 file_size_bytes=size,
                                 s3_etag=etag,
                                 s3_last_modified=last_modified,
-                                datetime=metadata["datetime"],
-                                width_px=metadata["width_px"],
-                                height_px=metadata["height_px"],
-                                mime_type=metadata["mime_type"],
-                                exif_data=metadata["exif_data"],
-                                rotation=metadata["rotation"],
+                                datetime=meta["datetime"],
+                                width_px=meta["width_px"],
+                                height_px=meta["height_px"],
+                                mime_type=meta["mime_type"],
+                                exif_data=meta["exif_data"],
+                                rotation=meta["rotation"],
                                 is_indexed=True,
                             )
                         )
                         if len(batch) >= batch_size:
-                            flush_batch()
+                            self._flush_batch(
+                                batch,
+                                batch_size,
+                                counts,
+                                grand_total,
+                                options["dry_run"],
+                            )
 
-                    if options["limit"] and matched_for_camera >= options["limit"]:
+                    if done:
                         break
 
-                if options["limit"] and matched_for_camera >= options["limit"]:
-                    break
-
-            flush_batch()
+            self._flush_batch(
+                batch, batch_size, counts, grand_total, options["dry_run"]
+            )
 
             self.stdout.write(
                 self.style.SUCCESS(
-                    f"Camera {camera.id}: seen={seen_for_camera}, matched={matched_for_camera}, upserted={upserted_for_camera}"
+                    f"Camera {camera.id} done: "
+                    f"seen={counts['seen']} matched={counts['matched']} "
+                    f"skipped={counts['skipped']} upserted={counts['upserted']}"
                 )
             )
 
         self.stdout.write(
             self.style.SUCCESS(
-                f"Done. seen={total_seen}, matched={total_matched}, upserted={total_upserted}"
+                f"\nAll cameras done: "
+                f"seen={grand_total['seen']} matched={grand_total['matched']} "
+                f"skipped={grand_total['skipped']} upserted={grand_total['upserted']}"
             )
         )

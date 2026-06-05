@@ -283,7 +283,7 @@ ImageTimeOfDayFilter = TimeOfDayFilterBase.create("datetime")
 class ImageAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "admin_thumbnail",
+        # "admin_thumbnail",
         "camera",
         "datetime",
         "filename",
@@ -296,23 +296,19 @@ class ImageAdmin(admin.ModelAdmin):
     )
     list_filter = (
         "camera",
-        "rotation",
         "label",
-        "bucket",
         ImageYearFilter,
         ImageMonthFilter,
-        ImageDayFilter,
+        # ImageDayFilter,
         ImageTimeOfDayFilter,
     )
     search_fields = (
         "id",
         "camera__camera_name",
         "filename",
-        "object_key",
-        "bucket",
         "label",
     )
-    date_hierarchy = "datetime"
+    # date_hierarchy = "datetime"
     readonly_fields = (
         "id",
         "indexed_at",
@@ -325,6 +321,7 @@ class ImageAdmin(admin.ModelAdmin):
     autocomplete_fields = ("camera",)
     ordering = ("-datetime", "-id")
     list_select_related = ("camera",)
+    show_full_result_count = False
 
     fields = (
         "id",
@@ -381,18 +378,18 @@ class ImageAdmin(admin.ModelAdmin):
             url,
         )
 
-    @admin.display(description="Thumb")
-    def admin_thumbnail(self, obj):
-        if not obj or not obj.pk:
-            return "-"
+    # @admin.display(description="Thumb")
+    # def admin_thumbnail(self, obj):
+    #     if not obj or not obj.pk:
+    #         return "-"
 
-        url = reverse("image_index:serve_image_thumbnail", args=[obj.pk])
-        return format_html(
-            '<img src="{}" alt="thumbnail" loading="lazy" decoding="async" '
-            'style="width:80px; height:56px; object-fit:cover; '
-            'border:1px solid #ddd; border-radius:4px;" />',
-            url,
-        )
+    #     url = reverse("image_index:serve_image_thumbnail", args=[obj.pk])
+    #     return format_html(
+    #         '<img src="{}" alt="thumbnail" loading="lazy" decoding="async" '
+    #         'style="width:80px; height:56px; object-fit:cover; '
+    #         'border:1px solid #ddd; border-radius:4px;" />',
+    #         url,
+    #     )
 
     @admin.display(description="View image")
     def view_image(self, obj):
