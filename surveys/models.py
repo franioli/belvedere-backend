@@ -12,6 +12,9 @@ class Survey(models.Model):
     class Meta:
         db_table = "surveys"
 
+    def __str__(self):
+        return f"Survey {self.id} - {self.date}"
+
 
 class Instrument(models.Model):
     id = models.IntegerField(primary_key=True)
@@ -24,6 +27,9 @@ class Instrument(models.Model):
 
     class Meta:
         db_table = "instruments"
+
+    def __str__(self):
+        return f"Instrument {self.id} - {self.name}"
 
 
 class SurveyHasInstrument(models.Model):
@@ -76,6 +82,9 @@ class Flight(models.Model):
     class Meta:
         db_table = "flights"
 
+    def __str__(self):
+        return f"Flight {self.id} - Survey {self.fk_surveys_id}"
+
 
 # ================ GNSS Measurement Models ================
 
@@ -93,6 +102,9 @@ class Point(models.Model):
 
     class Meta:
         db_table = "points"
+
+    def __str__(self):
+        return f"Point {self.id} - {self.label}"
 
 
 class Measurement(models.Model):
@@ -119,6 +131,11 @@ class Measurement(models.Model):
 
     class Meta:
         db_table = "measurements"
+
+    def __str__(self):
+        return (
+            f"Measurement {self.id} - Point {self.point_id} - Survey {self.survey_id}"
+        )
 
 
 class Photo(models.Model):
