@@ -1,12 +1,13 @@
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
+from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
 from .models import (
     Flight,
     Instrument,
     Measurement,
-    Photo,
+    MeasurementPhoto,
     Point,
     Survey,
     SurveyHasInstrument,
@@ -102,13 +103,27 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
         "meas_strategy",
     )
     list_filter = ("survey", "meas_date", "meas_strategy")
-    raw_id_fields = ("point", "survey", "point_photo")
+    raw_id_fields = ("point", "survey")
     ordering = ("-meas_date", "-id")
     readonly_fields = ("geom",)
 
 
-@admin.register(Photo)
-class PhotoAdmin(admin.ModelAdmin):
-    list_display = ("id", "file_name", "path")
-    search_fields = ("id", "file_name", "path")
-    ordering = ("file_name",)
+@admin.register(MeasurementPhoto)
+class MeasurementPhotoAdmin(admin.ModelAdmin):
+    list_display = ("id", "measurement", "file_name", "path", "image_preview")
+    search_fields = ("id", "measurement__id", "file_name", "path")
+    raw_id_fields = ("measurement",)
+    readonly_fields = ("path", "file_name", "image_preview")
+    fields = ("measurement", "image", "image_preview", "path", "file_name")
+
+    def image_preview(self, obj):
+        if obj and obj.image:
+            return format_html(
+                '<a href="{}" target="_blank" rel="noopener noreferrer">Open image</a><br>'
+                '<img src="{}" style="max-height:220px; max-width:220px; border:1px solid #ccc;" />',
+                obj.image.url,
+                obj.image.url,
+            )
+        return "-"
+
+    image_preview.short_description = "Preview"

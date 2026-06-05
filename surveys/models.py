@@ -1,3 +1,5 @@
+import os
+
 from django.contrib.gis.db import models
 
 # ================ Survey and Instrument Models ================
@@ -115,9 +117,6 @@ class Measurement(models.Model):
     h = models.FloatField()
     point = models.ForeignKey(Point, models.DO_NOTHING, db_column="point")
     survey = models.ForeignKey(Survey, models.DO_NOTHING, db_column="survey")
-    point_photo = models.ForeignKey(
-        "Photo", models.DO_NOTHING, db_column="point_photo", blank=True, null=True
-    )
     meas_date = models.DateField(blank=True, null=True)
     ds_east = models.FloatField(blank=True, null=True)
     ds_north = models.FloatField(blank=True, null=True)
@@ -132,22 +131,50 @@ class Measurement(models.Model):
     class Meta:
         db_table = "measurements"
 
-    def __str__(self):
-        return (
-            f"Measurement {self.id} - Point {self.point_id} - Survey {self.survey_id}"
-        )
+
+def measurement_photo_upload_to(instance, filename):
+    measurement_id = instance.measurement_id or "unassigned"
+    _, ext = os.path.splitext(filename)
+    ext = ext.lower() or ".jpg"
+    return f"measurements/{measurement_id}/photos/measurement_{measurement_id}{ext}"
 
 
-class Photo(models.Model):
-    id = models.IntegerField(primary_key=True)
-    path = models.CharField(max_length=254, blank=True, null=True)
-    file_name = models.CharField(max_length=254, blank=True, null=True)
-    image = models.BinaryField(blank=True, null=True)
+class MeasurementPhoto(models.Model):
+    id = models.IntegerField(primary_key=True)  # keep as-is
+    measurement = models.OneToOneField(
+        "Measurement",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="photo",
+    )
+    image = models.ImageField(
+        upload_to=measurement_photo_upload_to,
+        blank=True,
+        null=True,
+    )
+    path = models.CharField(max_length=254, blank=True, null=True, editable=False)
+    file_name = models.CharField(max_length=254, blank=True, null=True, editable=False)
 
     class Meta:
-        db_table = "photo"
+        db_table = "measurement_photos"
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
 
-# ================ DIC Velocity Data Models ================
+        updates = []
+        if self.image:
+            if self.path != self.image.name:
+                self.path = self.image.name
+                updates.append("path")
 
-# ================ Product Models ================
+            filename = os.path.basename(self.image.name)
+            if self.file_name != filename:
+                self.file_name = filename
+                updates.append("file_name")
+
+        if updates:
+            super().save(update_fields=updates)
+
+    def __str__(self):
+        return f"MeasurementPhoto {self.pk} - Measurement {self.measurement_id}"
