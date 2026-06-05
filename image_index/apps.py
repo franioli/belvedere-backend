@@ -2,4 +2,6 @@ from django.apps import AppConfig
 
 
 class ImageIndexConfig(AppConfig):
-    name = 'image_index'
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "image_index"
+    verbose_name = "Time lapse cameras image index"
