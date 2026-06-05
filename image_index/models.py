@@ -5,13 +5,20 @@ Django models Image Index app.
 import logging
 from enum import IntEnum
 from pathlib import PurePosixPath
+from urllib.parse import quote
 
+from django.conf import settings
 from django.contrib.gis.db import models
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.fields import ArrayField
 
-logger = logging.getLogger("belv")
+from image_index.image_metadata import (
+    FILENAME_DATETIME_RE,
+    parse_datetime_from_exif_dict,
+    parse_datetime_from_filename,
+)
 
+logger = logging.getLogger("belv")
 
 # ================ Camera and Calibration Models ================
 
@@ -277,14 +284,15 @@ class CameraCalibration(models.Model):
 class Image(models.Model):
     """Metadata for each image acquired by the cameras."""
 
+    FILENAME_DATETIME_RE = FILENAME_DATETIME_RE
+
     camera = models.ForeignKey(
-        Camera,
+        "image_index.Camera",
         on_delete=models.CASCADE,
         related_name="images",
         help_text="Camera that acquired or owns this image.",
     )
 
-    # S3 storage information for indexing and access; these fields are required for active cameras to enable indexing.
     bucket = models.CharField(
         max_length=255,
         help_text="S3 bucket containing the image object.",
@@ -317,7 +325,6 @@ class Image(models.Model):
         help_text="Object size in bytes as reported by S3.",
     )
 
-    # Image metadata fields, extracted from EXIF or external processing
     datetime = models.DateTimeField(
         null=True,
         blank=True,
@@ -357,7 +364,6 @@ class Image(models.Model):
         help_text="Optional tag or label for grouping or review.",
     )
 
-    # Indexing and processing status fields
     is_indexed = models.BooleanField(
         default=True,
         help_text="Whether the image has been successfully indexed from S3.",
@@ -374,10 +380,6 @@ class Image(models.Model):
     class Meta:
         constraints = [
             models.UniqueConstraint(
-                fields=["camera", "datetime"],
-                name="unique_camera_datetime",
-            ),
-            models.UniqueConstraint(
                 fields=["bucket", "object_key"],
                 name="unique_bucket_object_key",
             ),
@@ -390,7 +392,12 @@ class Image(models.Model):
 
     @property
     def file_path(self):
-        return f"s3://{self.bucket}/{self.object_key}"
+        endpoint = (getattr(settings, "S3_ENDPOINT_URL", "") or "s3").rstrip("/")
+        if not endpoint or not self.bucket or not self.object_key:
+            return ""
+
+        encoded_key = quote(self.object_key, safe="/")
+        return f"{endpoint}/{self.bucket}/{encoded_key}"
 
     @property
     def file_name(self):
@@ -398,9 +405,8 @@ class Image(models.Model):
 
     @property
     def file_size_mb(self) -> float | None:
-        size_bytes = self.file_size_bytes
-        if size_bytes is not None:
-            return round(size_bytes / (1024 * 1024), 2)
+        if self.file_size_bytes is not None:
+            return round(self.file_size_bytes / (1024 * 1024), 2)
         return None
 
     @property
@@ -415,13 +421,30 @@ class Image(models.Model):
             size_bytes /= 1024.0
         return f"{size_bytes:.2f} TB"
 
+    def extract_datetime_from_exif(self):
+        return parse_datetime_from_exif_dict(self.exif_data)
+
+    def extract_datetime_from_filename(self):
+        return parse_datetime_from_filename(self.filename or self.file_name)
+
+    def extract_datetime(self):
+        return (
+            self.extract_datetime_from_exif() or self.extract_datetime_from_filename()
+        )
+
     def save(self, *args, **kwargs):
         if self.object_key and not self.filename:
             self.filename = PurePosixPath(self.object_key).name
 
         if self.exif_data and isinstance(self.exif_data, dict):
-            orientation = self.exif_data.get("Image Orientation", "")
+            orientation = self.exif_data.get("Orientation") or self.exif_data.get(
+                "Image Orientation"
+            )
             orientation_map = {
+                1: 0,
+                3: 180,
+                6: 90,
+                8: 270,
                 "Horizontal (normal)": 0,
                 "Rotated 90 CW": 90,
                 "Rotated 180": 180,
@@ -429,6 +452,9 @@ class Image(models.Model):
                 "Rotated 270 CW": 270,
             }
             self.rotation = orientation_map.get(orientation, 0)
+
+        if self.datetime is None:
+            self.datetime = self.extract_datetime()
 
         super().save(*args, **kwargs)
 

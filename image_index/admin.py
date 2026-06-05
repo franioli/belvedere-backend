@@ -23,7 +23,9 @@ class CameraAdminForm(forms.ModelForm):
 @admin.register(Camera)
 class CameraAdmin(gis_admin.GISModelAdmin):
     form = CameraAdminForm
-    prepopulated_fields = {"slug": ("camera_name",), }
+    prepopulated_fields = {
+        "slug": ("camera_name",),
+    }
 
     list_display = (
         "id",
@@ -220,115 +222,68 @@ ImageTimeOfDayFilter = TimeOfDayFilterBase.create("datetime")
 # ========== Image helpers ==========
 
 
-FILE_SIZE_CLASSES_MB = {
-    "large": (8, None),
-    "medium": (5, 8),
-    "small": (3, 5),
-    "tiny": (0, 3),
-}
+# FILE_SIZE_CLASSES_MB = {
+#     "large": (8, None),
+#     "medium": (5, 8),
+#     "small": (3, 5),
+#     "tiny": (0, 3),
+# }
 
-FILE_SIZE_COLORMAP = {
-    "large": "#090",
-    "medium": "#f90",
-    "small": "#d00",
-    "tiny": "#999",
-}
-
-
-def get_file_size_color(size_mb):
-    if size_mb is None:
-        return "#999"
-    for cls, (low, high) in FILE_SIZE_CLASSES_MB.items():
-        if size_mb >= low and (high is None or size_mb < high):
-            return FILE_SIZE_COLORMAP[cls]
-    return "#999"
+# FILE_SIZE_COLORMAP = {
+#     "large": "#090",
+#     "medium": "#f90",
+#     "small": "#d00",
+#     "tiny": "#999",
+# }
 
 
-class FileSizeFilter(admin.SimpleListFilter):
-    title = "file size"
-    parameter_name = "file_size"
-
-    def lookups(self, request, model_admin):
-        return (
-            ("large", "≥ 8 MB"),
-            ("medium", "5–8 MB"),
-            ("small", "3–5 MB"),
-            ("tiny", "< 3 MB"),
-            ("missing", "Missing"),
-        )
-
-    def queryset(self, request, queryset):
-        mb = 1024 * 1024
-        val = self.value()
-
-        if val == "missing":
-            return queryset.filter(file_size_bytes__isnull=True)
-
-        if val in FILE_SIZE_CLASSES_MB:
-            low_mb, high_mb = FILE_SIZE_CLASSES_MB[val]
-            qs = queryset.filter(file_size_bytes__isnull=False).filter(
-                file_size_bytes__gte=int(low_mb * mb)
-            )
-            if high_mb is not None:
-                qs = qs.filter(file_size_bytes__lt=int(high_mb * mb))
-            return qs
-
-        return queryset
+# def get_file_size_color(size_mb):
+#     if size_mb is None:
+#         return "#999"
+#     for cls, (low, high) in FILE_SIZE_CLASSES_MB.items():
+#         if size_mb >= low and (high is None or size_mb < high):
+#             return FILE_SIZE_COLORMAP[cls]
+#     return "#999"
 
 
-class PreviewWidget(forms.TextInput):
-    def __init__(self, attrs=None, image_url=None):
-        super().__init__(attrs)
-        self.image_url = image_url
+# class FileSizeFilter(admin.SimpleListFilter):
+#     title = "file size"
+#     parameter_name = "file_size"
 
-    def render(self, name, value, attrs=None, renderer=None):
-        input_html = super().render(name, value, attrs=attrs, renderer=renderer)
-        if self.image_url:
-            preview = format_html(
-                '<div style="margin-top:6px;"><img src="{}" '
-                'style="max-width:220px; max-height:140px; border:1px solid #ddd; border-radius:4px;" '
-                'alt="preview" /></div>',
-                self.image_url,
-            )
-            return format_html("{}{}", input_html, preview)
-        return input_html
+#     def lookups(self, request, model_admin):
+#         return (
+#             ("large", "≥ 8 MB"),
+#             ("medium", "5–8 MB"),
+#             ("small", "3–5 MB"),
+#             ("tiny", "< 3 MB"),
+#             ("missing", "Missing"),
+#         )
+
+#     def queryset(self, request, queryset):
+#         mb = 1024 * 1024
+#         val = self.value()
+
+#         if val == "missing":
+#             return queryset.filter(file_size_bytes__isnull=True)
+
+#         if val in FILE_SIZE_CLASSES_MB:
+#             low_mb, high_mb = FILE_SIZE_CLASSES_MB[val]
+#             qs = queryset.filter(file_size_bytes__isnull=False).filter(
+#                 file_size_bytes__gte=int(low_mb * mb)
+#             )
+#             if high_mb is not None:
+#                 qs = qs.filter(file_size_bytes__lt=int(high_mb * mb))
+#             return qs
 
 
-class ImageAdminForm(forms.ModelForm):
-    class Meta:
-        model = Image
-        exclude = ("exif_data",)
-
-    def __init__(self, *args, **kwargs):
-        instance = kwargs.get("instance")
-        super().__init__(*args, **kwargs)
-
-        if instance and getattr(instance, "exif_data", None):
-            try:
-                self.formatted_exif_initial = json.dumps(
-                    instance.exif_data, indent=2, ensure_ascii=False, sort_keys=True
-                )
-            except (TypeError, ValueError):
-                self.formatted_exif_initial = None
-
-        preview_url = None
-        try:
-            if instance and instance.pk:
-                preview_url = reverse("serve_image", args=[instance.pk])
-        except Exception:
-            preview_url = None
-
-        if "object_key" in self.fields:
-            self.fields["object_key"].widget = PreviewWidget(
-                attrs={"size": 80}, image_url=preview_url
-            )
+#         return queryset
 
 
 @admin.register(Image)
 class ImageAdmin(admin.ModelAdmin):
-    form = ImageAdminForm
     list_display = (
         "id",
+        "admin_thumbnail",
         "camera",
         "datetime",
         "filename",
@@ -337,7 +292,6 @@ class ImageAdmin(admin.ModelAdmin):
         "rotation",
         "width_px",
         "height_px",
-        "file_size_display",
         "view_image",
     )
     list_filter = (
@@ -349,7 +303,6 @@ class ImageAdmin(admin.ModelAdmin):
         ImageMonthFilter,
         ImageDayFilter,
         ImageTimeOfDayFilter,
-        FileSizeFilter,
     )
     search_fields = (
         "id",
@@ -358,7 +311,6 @@ class ImageAdmin(admin.ModelAdmin):
         "object_key",
         "bucket",
         "label",
-        "s3_etag",
     )
     date_hierarchy = "datetime"
     readonly_fields = (
@@ -368,50 +320,84 @@ class ImageAdmin(admin.ModelAdmin):
         "file_size_bytes",
         "formatted_exif_data",
         "file_path",
+        "image_preview",
     )
     autocomplete_fields = ("camera",)
     ordering = ("-datetime", "-id")
     list_select_related = ("camera",)
 
+    fields = (
+        "id",
+        "camera",
+        "datetime",
+        "filename",
+        "label",
+        "bucket",
+        "object_key",
+        "file_path",
+        "image_preview",
+        "rotation",
+        "width_px",
+        "height_px",
+        "file_size_bytes",
+        "formatted_exif_data",
+        "indexed_at",
+        "updated_at",
+    )
+
     def get_queryset(self, request):
         return super().get_queryset(request).select_related("camera")
 
-    @admin.display(ordering="file_size_bytes", description="File size")
-    def file_size_display(self, obj):
-        size_mb = obj.file_size_mb if hasattr(obj, "file_size_mb") else None
-        if size_mb is None:
-            return format_html('<span style="color:#999;">Not found</span>')
-        color = get_file_size_color(size_mb)
-        return format_html(
-            '<span style="color:{}; font-weight:bold;">{:.1f} MB</span>',
-            color,
-            size_mb,
-        )
-
     @admin.display(description="EXIF data")
     def formatted_exif_data(self, obj):
-        if obj.exif_data:
-            try:
-                formatted_json = json.dumps(
-                    obj.exif_data, indent=2, ensure_ascii=False, sort_keys=True
-                )
-                return format_html(
-                    '<pre style="background:#f8f8f8; padding:10px; border:1px solid #ddd; '
-                    "border-radius:4px; font-family:monospace; font-size:12px; "
-                    'max-height:400px; overflow-y:auto;">{}</pre>',
-                    formatted_json,
-                )
-            except (TypeError, ValueError):
-                return format_html(
-                    '<pre style="background:#fff2f2; padding:10px; border:1px solid #fdd; '
-                    'border-radius:4px; color:#d00;">Invalid JSON data</pre>'
-                )
-        return "No EXIF data"
+        if not obj.exif_data:
+            return "No EXIF data"
+
+        try:
+            formatted_json = json.dumps(
+                obj.exif_data, indent=2, ensure_ascii=False, sort_keys=True
+            )
+            return format_html(
+                '<pre style="background:#f8f8f8; padding:10px; border:1px solid #ddd; '
+                "border-radius:4px; font-family:monospace; font-size:12px; "
+                'max-height:400px; overflow-y:auto;">{}</pre>',
+                formatted_json,
+            )
+        except (TypeError, ValueError):
+            return format_html(
+                '<pre style="background:#fff2f2; padding:10px; border:1px solid #fdd; '
+                'border-radius:4px; color:#d00;">Invalid JSON data</pre>'
+            )
+
+    @admin.display(description="Preview")
+    def image_preview(self, obj):
+        if not obj or not obj.pk:
+            return "Save the image first to see a preview"
+
+        url = reverse("image_index:serve_image_preview", args=[obj.pk])
+        return format_html(
+            '<img src="{}" alt="preview" loading="lazy" decoding="async" '
+            'style="max-width:420px; max-height:280px; border:1px solid #ddd; border-radius:6px;" />',
+            url,
+        )
+
+    @admin.display(description="Thumb")
+    def admin_thumbnail(self, obj):
+        if not obj or not obj.pk:
+            return "-"
+
+        url = reverse("image_index:serve_image_thumbnail", args=[obj.pk])
+        return format_html(
+            '<img src="{}" alt="thumbnail" loading="lazy" decoding="async" '
+            'style="width:80px; height:56px; object-fit:cover; '
+            'border:1px solid #ddd; border-radius:4px;" />',
+            url,
+        )
 
     @admin.display(description="View image")
     def view_image(self, obj):
-        try:
-            url = reverse("serve_image", args=[obj.pk])
-            return format_html('<a href="{}" target="_blank">View Image</a>', url)
-        except Exception:
-            return "-"
+        url = reverse("image_index:serve_image", args=[obj.pk])
+        return format_html(
+            '<a href="{}" target="_blank" rel="noopener noreferrer">View Image</a>',
+            url,
+        )
