@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
+from import_export.admin import ImportExportMixin
 
 from .models import (
     Flight,
@@ -10,6 +11,7 @@ from .models import (
     Survey,
     SurveyHasInstrument,
 )
+from .resources import MeasurementResource
 
 
 @admin.register(Survey)
@@ -78,7 +80,9 @@ class PointAdmin(admin.ModelAdmin):
 
 
 @admin.register(Measurement)
-class MeasurementAdmin(gis_admin.GISModelAdmin):
+class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
+    resource_classes = [MeasurementResource]
+
     list_display = (
         "id",
         "point",

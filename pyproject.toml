@@ -18,4 +18,5 @@ dependencies = [
     "django-contrib-postgres>=0.0.1",
     "pillow>=12.2.0",
     "whitenoise>=6.12.0",
+    "django-import-export>=4.4.1",
 ]
