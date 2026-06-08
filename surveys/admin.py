@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
+from django.contrib.gis.forms.widgets import OSMWidget
 from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
@@ -80,9 +81,16 @@ class PointAdmin(admin.ModelAdmin):
     ordering = ("label", "id")
 
 
+class MapWidget(OSMWidget):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attrs.update({"map_width": 800, "map_height": 500})
+
+
 @admin.register(Measurement)
 class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
     resource_classes = [MeasurementResource]
+    gis_widget = MapWidget
 
     list_display = (
         "id",
@@ -105,7 +113,37 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
     list_filter = ("survey", "meas_date", "meas_strategy")
     raw_id_fields = ("point", "survey")
     ordering = ("-meas_date", "-id")
-    readonly_fields = ("geom",)
+    readonly_fields = ()
+
+    fieldsets = (
+        (
+            None,
+            {
+                "fields": (
+                    "point",
+                    "survey",
+                    "meas_date",
+                    "meas_strategy",
+                    "east",
+                    "north",
+                    "h",
+                    "ds_east",
+                    "ds_north",
+                    "ds_h",
+                    "lat",
+                    "lon",
+                    "h_orto",
+                    "notes",
+                )
+            },
+        ),
+        (
+            "Map",
+            {
+                "fields": ("geom",),
+            },
+        ),
+    )
 
 
 @admin.register(MeasurementPhoto)

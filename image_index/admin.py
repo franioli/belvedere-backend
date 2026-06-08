@@ -3,7 +3,7 @@ import json
 from django import forms
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
-from django.contrib.gis.forms import OSMWidget
+from django.contrib.gis.forms.widgets import OSMWidget
 from django.db.models import Count, Max, Min
 from django.urls import reverse
 from django.utils.html import format_html
