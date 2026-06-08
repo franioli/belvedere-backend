@@ -1,0 +1,97 @@
+# belvedere-backend
+
+Django REST API backend for the Belvedere survey management system. Manages geodetic survey campaigns, measurement points, observations, and associated media, backed by a PostGIS database and AWS S3 for file storage.
+
+## Stack
+
+- **Python** ≥ 3.12
+- **Django** ≥ 5.0 + Django REST Framework
+- **PostgreSQL** + PostGIS (via `psycopg` v3)
+- **AWS S3** via `django-storages`
+- **Gunicorn** (production server)
+- **Docker**
+
+## Requirements
+
+- Python ≥ 3.12
+- PostgreSQL with PostGIS extension enabled
+- [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
+
+## Installation
+
+```bash
+git clone https://github.com/franioli/belvedere-backend.git
+cd belvedere-backend
+
+# Install dependencies
+uv sync
+# or: pip install -e .
+
+# Copy and configure environment variables
+cp .env.example .env
+# Edit .env with your DB credentials, AWS keys, secret key, etc.
+
+# Apply migrations
+uv run python manage.py migrate
+
+# Create superuser
+uv runpython manage.py createsuperuser
+
+# Run development server
+uv run python manage.py runserver
+```
+
+### Docker
+
+```bash
+docker build -t belvedere-backend .
+docker run --env-file .env -p 8000:8000 belvedere-backend
+```
+
+## Environment Variables
+
+| Variable | Description |
+|---|---|
+| `SECRET_KEY` | Django secret key |
+| `DEBUG` | `True` / `False` |
+| `ALLOWED_HOSTS` | Comma-separated hostnames |
+| `DATABASE_URL` | PostgreSQL connection string |
+| `AWS_ACCESS_KEY_ID` | AWS credentials |
+| `AWS_SECRET_ACCESS_KEY` | AWS credentials |
+| `AWS_STORAGE_BUCKET_NAME` | S3 bucket name |
+| `AWS_S3_REGION_NAME` | S3 region |
+
+## Project Structure
+
+```
+belvedere-backend/
+├── config/                  # Django project settings
+│   ├── settings.py
+│   ├── urls.py
+│   ├── wsgi.py
+│   └── asgi.py
+├── surveys/                 # Core app: campaigns, points, measurements
+│   ├── models.py
+│   ├── admin.py
+│   ├── views.py
+│   ├── serializers.py
+│   └── migrations/
+├── api/                     # API routing and views
+├── image_index/             # Image indexing app
+├── staticfiles/             # Collected static files
+├── manage.py
+├── pyproject.toml
+└── Dockerfile
+```
+
+## Apps
+
+| App | Purpose |
+|---|---|
+| `surveys` | Campaigns, survey points, measurements, photos |
+| `api` | REST API endpoints and routing |
+| `image_index` | Image metadata and indexing |
+
+## Admin
+
+The Django admin panel is available at `/admin/`. It supports CSV import/export for measurements (via `django-import-export`) and image upload for measurement photos stored in S3.
