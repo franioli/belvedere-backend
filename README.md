@@ -1,6 +1,6 @@
 # belvedere-backend
 
-Django REST API backend for the Belvedere survey management system. Manages geodetic survey campaigns, measurement points, observations, and associated media, backed by a PostGIS database and AWS S3 for file storage.
+Django API backend for the Belvedere survey and image indexing system.
 
 ## Stack
 
@@ -37,9 +37,25 @@ uv run python manage.py migrate
 # Create superuser
 uv runpython manage.py createsuperuser
 
-# Run development server
+# Run development server 
 uv run python manage.py runserver
 ```
+
+### Production
+
+Collect static files for production:
+
+```bash
+uv run python manage.py collectstatic --noinput
+```
+
+Run Gunicorn for production:
+
+```bash
+uv run gunicorn config.wsgi:application --bind 0.0.0.0:8000
+``` 
+Change the bind address and port as needed (e.g., if 8000 is already in use). Optionally, add options for workers, logging, etc. (see .env.example for example Gunicorn configuration).
+
 
 ### Docker
 
