@@ -17,7 +17,8 @@ nohup.out
 .logs/
 _old/
 
-./context/
+
+context/
 CLAUDE.md
 
 # SMB credentials - never commit these!
