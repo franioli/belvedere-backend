@@ -357,6 +357,19 @@ class Image(models.Model):
         help_text="Display rotation in degrees derived from EXIF orientation, usually 0, 90, 180, or 270.",
     )
 
+    preview_object_key = models.CharField(
+        max_length=1024,
+        null=True,
+        blank=True,
+        help_text="S3 key of the pre-generated preview (640×480 JPEG with watermark). Null if not yet generated.",
+    )
+    thumbnail_object_key = models.CharField(
+        max_length=1024,
+        null=True,
+        blank=True,
+        help_text="S3 key of the pre-generated thumbnail (160×120 JPEG). Null if not yet generated.",
+    )
+
     label = models.CharField(
         max_length=500,
         null=True,
