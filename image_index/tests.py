@@ -319,3 +319,76 @@ class GeneratePreviewsCommandTests(TestCase):
 
         self.img1.refresh_from_db()
         self.assertIsNone(self.img1.preview_object_key)
+
+
+class PresignedUrlViewTests(TestCase):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.camera = Camera.objects.create(
+            camera_name="Signed Cam",
+            slug="signed-cam",
+            s3_bucket="bkt",
+            s3_prefix="sc/",
+        )
+        self.image = Image.objects.create(
+            camera=self.camera,
+            bucket="bkt",
+            object_key="sc/img.jpg",
+            filename="img.jpg",
+        )
+
+    def _patch_s3(self, signed_url="https://s3.example.com/signed"):
+        return (
+            patch("image_index.views.build_s3_client", return_value=Mock()),
+            patch(
+                "image_index.views.generate_presigned_url",
+                return_value=signed_url,
+            ),
+        )
+
+    def test_preview_url_returns_presigned_url_when_key_set(self):
+        self.image.preview_object_key = "previews/sc/img.jpg"
+        self.image.save()
+
+        build_p, sign_p = self._patch_s3()
+        with build_p, sign_p as mock_sign:
+            response = self.client.get(f"/cams/images/{self.image.pk}/preview-url/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["url"], "https://s3.example.com/signed")
+        self.assertEqual(data["expires_in"], 3600)
+        mock_sign.assert_called_once_with(ANY, "bkt", "previews/sc/img.jpg")
+
+    def test_preview_url_returns_proxy_fallback_when_no_key(self):
+        build_p, sign_p = self._patch_s3()
+        with build_p, sign_p as mock_sign:
+            response = self.client.get(f"/cams/images/{self.image.pk}/preview-url/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn(f"/cams/images/{self.image.pk}/preview/", data["url"])
+        mock_sign.assert_not_called()
+
+    def test_thumbnail_url_returns_presigned_url_when_key_set(self):
+        self.image.thumbnail_object_key = "thumbnails/sc/img.jpg"
+        self.image.save()
+
+        build_p, sign_p = self._patch_s3()
+        with build_p, sign_p as mock_sign:
+            response = self.client.get(f"/cams/images/{self.image.pk}/thumb-url/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["url"], "https://s3.example.com/signed")
+        mock_sign.assert_called_once_with(ANY, "bkt", "thumbnails/sc/img.jpg")
+
+    def test_thumbnail_url_returns_proxy_fallback_when_no_key(self):
+        build_p, sign_p = self._patch_s3()
+        with build_p, sign_p as mock_sign:
+            response = self.client.get(f"/cams/images/{self.image.pk}/thumb-url/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn(f"/cams/images/{self.image.pk}/thumb/", data["url"])
+        mock_sign.assert_not_called()

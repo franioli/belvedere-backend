@@ -1,7 +1,8 @@
 from io import BytesIO
 
-from django.http import Http404, HttpRequest, HttpResponse
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
+from django.urls import reverse
 from django.views.decorators.http import require_GET
 from PIL import Image as PILImage
 from PIL import ImageOps
@@ -9,7 +10,11 @@ from rest_framework.generics import ListAPIView
 from rest_framework.pagination import PageNumberPagination
 
 from image_index.models import Camera, Image
-from image_index.s3_utils import build_s3_client, get_object_bytes
+from image_index.s3_utils import (
+    build_s3_client,
+    generate_presigned_url,
+    get_object_bytes,
+)
 from image_index.serializers import CameraSerializer, ImageSerializer
 
 PREVIEW_SIZE = (1280, 960)
@@ -166,3 +171,37 @@ def serve_image_thumbnail(request: HttpRequest, pk: int) -> HttpResponse:
         max_size=THUMBNAIL_SIZE,
         quality=THUMBNAIL_QUALITY,
     )
+
+
+@require_GET
+def image_preview_url(request: HttpRequest, pk: int) -> JsonResponse:
+    """Return a presigned S3 URL for the pre-generated preview.
+
+    Falls back to the Django proxy URL if no preview has been generated yet.
+    """
+    image = get_object_or_404(Image, pk=pk)
+    if image.preview_object_key:
+        s3 = build_s3_client()
+        url = generate_presigned_url(s3, image.bucket, image.preview_object_key)
+    else:
+        url = request.build_absolute_uri(
+            reverse("image_index:serve_image_preview", args=[pk])
+        )
+    return JsonResponse({"url": url, "expires_in": 3600})
+
+
+@require_GET
+def image_thumbnail_url(request: HttpRequest, pk: int) -> JsonResponse:
+    """Return a presigned S3 URL for the pre-generated thumbnail.
+
+    Falls back to the Django proxy URL if no thumbnail has been generated yet.
+    """
+    image = get_object_or_404(Image, pk=pk)
+    if image.thumbnail_object_key:
+        s3 = build_s3_client()
+        url = generate_presigned_url(s3, image.bucket, image.thumbnail_object_key)
+    else:
+        url = request.build_absolute_uri(
+            reverse("image_index:serve_image_thumbnail", args=[pk])
+        )
+    return JsonResponse({"url": url, "expires_in": 3600})
