@@ -4,15 +4,17 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('image_index', '0002_alter_camera_camera_name_alter_camera_easting_and_more'),
+        ("image_index", "0002_alter_camera_camera_name_alter_camera_easting_and_more"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='camera',
-            name='is_active',
-            field=models.BooleanField(default=True, help_text='Whether this camera is active and should be indexed from S3. Inactive cameras will be ignored by the indexing command.'),
+            model_name="camera",
+            name="is_active",
+            field=models.BooleanField(
+                default=True,
+                help_text="Whether this camera is active and should be indexed from S3. Inactive cameras will be ignored by the indexing command.",
+            ),
         ),
     ]

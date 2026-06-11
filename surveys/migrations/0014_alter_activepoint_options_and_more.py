@@ -4,26 +4,44 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0013_activepoint_pointsmeasurement_pointsmovementfiltered_and_more'),
+        (
+            "surveys",
+            "0013_activepoint_pointsmeasurement_pointsmovementfiltered_and_more",
+        ),
     ]
 
     operations = [
         migrations.AlterModelOptions(
-            name='activepoint',
-            options={'managed': False, 'verbose_name': 'Active point (read-only view)', 'verbose_name_plural': 'Active points (read-only view)'},
+            name="activepoint",
+            options={
+                "managed": False,
+                "verbose_name": "Active point (read-only view)",
+                "verbose_name_plural": "Active points (read-only view)",
+            },
         ),
         migrations.AlterModelOptions(
-            name='pointsmeasurement',
-            options={'managed': False, 'verbose_name': 'Points measurement (read-only view)', 'verbose_name_plural': 'Points measurements (read-only view)'},
+            name="pointsmeasurement",
+            options={
+                "managed": False,
+                "verbose_name": "Points measurement (read-only view)",
+                "verbose_name_plural": "Points measurements (read-only view)",
+            },
         ),
         migrations.AlterModelOptions(
-            name='pointsmovementfiltered',
-            options={'managed': False, 'verbose_name': 'Points movement filtered (read-only view)', 'verbose_name_plural': 'Points movements filtered (read-only view)'},
+            name="pointsmovementfiltered",
+            options={
+                "managed": False,
+                "verbose_name": "Points movement filtered (read-only view)",
+                "verbose_name_plural": "Points movements filtered (read-only view)",
+            },
         ),
         migrations.AlterModelOptions(
-            name='pointsmovementraw',
-            options={'managed': False, 'verbose_name': 'Points movement raw (read-only view)', 'verbose_name_plural': 'Points movements raw (read-only view)'},
+            name="pointsmovementraw",
+            options={
+                "managed": False,
+                "verbose_name": "Points movement raw (read-only view)",
+                "verbose_name_plural": "Points movements raw (read-only view)",
+            },
         ),
     ]

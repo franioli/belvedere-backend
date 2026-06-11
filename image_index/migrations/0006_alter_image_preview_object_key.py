@@ -4,15 +4,19 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('image_index', '0005_add_preview_thumbnail_keys'),
+        ("image_index", "0005_add_preview_thumbnail_keys"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='image',
-            name='preview_object_key',
-            field=models.CharField(blank=True, help_text='S3 key of the pre-generated preview (640×480 JPEG with watermark). Null if not yet generated.', max_length=1024, null=True),
+            model_name="image",
+            name="preview_object_key",
+            field=models.CharField(
+                blank=True,
+                help_text="S3 key of the pre-generated preview (640×480 JPEG with watermark). Null if not yet generated.",
+                max_length=1024,
+                null=True,
+            ),
         ),
     ]

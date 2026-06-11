@@ -4,14 +4,13 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('image_index', '0003_camera_is_active'),
+        ("image_index", "0003_camera_is_active"),
     ]
 
     operations = [
         migrations.RemoveConstraint(
-            model_name='image',
-            name='unique_camera_datetime',
+            model_name="image",
+            name="unique_camera_datetime",
         ),
     ]

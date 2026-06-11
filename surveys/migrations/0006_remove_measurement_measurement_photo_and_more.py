@@ -5,23 +5,28 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0005_measurementphoto_s3_image'),
+        ("surveys", "0005_measurementphoto_s3_image"),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='measurement',
-            name='measurement_photo',
+            model_name="measurement",
+            name="measurement_photo",
         ),
         migrations.RemoveField(
-            model_name='measurementphoto',
-            name='s3_image',
+            model_name="measurementphoto",
+            name="s3_image",
         ),
         migrations.AddField(
-            model_name='measurementphoto',
-            name='measurement',
-            field=models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.CASCADE, related_name='photo_new', to='surveys.measurement'),
+            model_name="measurementphoto",
+            name="measurement",
+            field=models.OneToOneField(
+                blank=True,
+                null=True,
+                on_delete=django.db.models.deletion.CASCADE,
+                related_name="photo_new",
+                to="surveys.measurement",
+            ),
         ),
     ]

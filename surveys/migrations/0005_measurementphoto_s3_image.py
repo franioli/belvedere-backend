@@ -4,15 +4,16 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0004_alter_measurement_measurement_photo'),
+        ("surveys", "0004_alter_measurement_measurement_photo"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='measurementphoto',
-            name='s3_image',
-            field=models.ImageField(blank=True, null=True, upload_to='measurements/photos/'),
+            model_name="measurementphoto",
+            name="s3_image",
+            field=models.ImageField(
+                blank=True, null=True, upload_to="measurements/photos/"
+            ),
         ),
     ]

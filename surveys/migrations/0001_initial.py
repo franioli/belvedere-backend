@@ -6,128 +6,222 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     initial = True
 
-    dependencies = [
-    ]
+    dependencies = []
 
     operations = [
         migrations.CreateModel(
-            name='Instrument',
+            name="Instrument",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('name', models.CharField(blank=True, max_length=254, null=True)),
-                ('type', models.CharField(blank=True, max_length=254, null=True)),
-                ('specificat', models.CharField(blank=True, max_length=254, null=True)),
-                ('brand', models.CharField(blank=True, max_length=254, null=True)),
-                ('year_of_m', models.BigIntegerField(blank=True, null=True)),
-                ('reseller', models.CharField(blank=True, max_length=254, null=True)),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                ("name", models.CharField(blank=True, max_length=254, null=True)),
+                ("type", models.CharField(blank=True, max_length=254, null=True)),
+                ("specificat", models.CharField(blank=True, max_length=254, null=True)),
+                ("brand", models.CharField(blank=True, max_length=254, null=True)),
+                ("year_of_m", models.BigIntegerField(blank=True, null=True)),
+                ("reseller", models.CharField(blank=True, max_length=254, null=True)),
             ],
             options={
-                'db_table': 'instruments',
+                "db_table": "instruments",
             },
         ),
         migrations.CreateModel(
-            name='Photo',
+            name="Photo",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('path', models.CharField(blank=True, max_length=254, null=True)),
-                ('file_name', models.CharField(blank=True, max_length=254, null=True)),
-                ('image', models.BinaryField(blank=True, null=True)),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                ("path", models.CharField(blank=True, max_length=254, null=True)),
+                ("file_name", models.CharField(blank=True, max_length=254, null=True)),
+                ("image", models.BinaryField(blank=True, null=True)),
             ],
             options={
-                'db_table': 'photo',
+                "db_table": "photo",
             },
         ),
         migrations.CreateModel(
-            name='Point',
+            name="Point",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('label', models.CharField(blank=True, max_length=45, null=True)),
-                ('active', models.BooleanField(blank=True, null=True)),
-                ('is_fixed', models.BooleanField(blank=True, null=True)),
-                ('ref_date', models.DateField(blank=True, null=True)),
-                ('first_survey_date', models.DateField(blank=True, null=True)),
-                ('last_survey_date', models.DateField(blank=True, null=True)),
-                ('num_measurements', models.BigIntegerField(blank=True, null=True)),
-                ('notes', models.CharField(blank=True, max_length=512, null=True)),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                ("label", models.CharField(blank=True, max_length=45, null=True)),
+                ("active", models.BooleanField(blank=True, null=True)),
+                ("is_fixed", models.BooleanField(blank=True, null=True)),
+                ("ref_date", models.DateField(blank=True, null=True)),
+                ("first_survey_date", models.DateField(blank=True, null=True)),
+                ("last_survey_date", models.DateField(blank=True, null=True)),
+                ("num_measurements", models.BigIntegerField(blank=True, null=True)),
+                ("notes", models.CharField(blank=True, max_length=512, null=True)),
             ],
             options={
-                'db_table': 'points',
+                "db_table": "points",
             },
         ),
         migrations.CreateModel(
-            name='Survey',
+            name="Survey",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('date', models.DateField(blank=True, null=True)),
-                ('year', models.BigIntegerField(blank=True, null=True)),
-                ('notes', models.CharField(blank=True, max_length=254, null=True)),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                ("date", models.DateField(blank=True, null=True)),
+                ("year", models.BigIntegerField(blank=True, null=True)),
+                ("notes", models.CharField(blank=True, max_length=254, null=True)),
             ],
             options={
-                'db_table': 'surveys',
+                "db_table": "surveys",
             },
         ),
         migrations.CreateModel(
-            name='Measurement',
+            name="Measurement",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('geom', django.contrib.gis.db.models.fields.PointField(blank=True, null=True, srid=32632)),
-                ('east', models.FloatField()),
-                ('north', models.FloatField()),
-                ('h', models.FloatField()),
-                ('meas_date', models.DateField(blank=True, null=True)),
-                ('ds_east', models.FloatField(blank=True, null=True)),
-                ('ds_north', models.FloatField(blank=True, null=True)),
-                ('ds_h', models.FloatField(blank=True, null=True)),
-                ('meas_strategy', models.CharField(blank=True, max_length=25, null=True)),
-                ('meas_time', models.DateTimeField(blank=True, null=True)),
-                ('notes', models.CharField(blank=True, max_length=250, null=True)),
-                ('lat', models.FloatField(blank=True, null=True)),
-                ('lon', models.FloatField(blank=True, null=True)),
-                ('h_orto', models.FloatField(blank=True, null=True)),
-                ('point_photo', models.ForeignKey(blank=True, db_column='point_photo', null=True, on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.photo')),
-                ('point', models.ForeignKey(db_column='point', on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.point')),
-                ('survey', models.ForeignKey(db_column='survey', on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.survey')),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                (
+                    "geom",
+                    django.contrib.gis.db.models.fields.PointField(
+                        blank=True, null=True, srid=32632
+                    ),
+                ),
+                ("east", models.FloatField()),
+                ("north", models.FloatField()),
+                ("h", models.FloatField()),
+                ("meas_date", models.DateField(blank=True, null=True)),
+                ("ds_east", models.FloatField(blank=True, null=True)),
+                ("ds_north", models.FloatField(blank=True, null=True)),
+                ("ds_h", models.FloatField(blank=True, null=True)),
+                (
+                    "meas_strategy",
+                    models.CharField(blank=True, max_length=25, null=True),
+                ),
+                ("meas_time", models.DateTimeField(blank=True, null=True)),
+                ("notes", models.CharField(blank=True, max_length=250, null=True)),
+                ("lat", models.FloatField(blank=True, null=True)),
+                ("lon", models.FloatField(blank=True, null=True)),
+                ("h_orto", models.FloatField(blank=True, null=True)),
+                (
+                    "point_photo",
+                    models.ForeignKey(
+                        blank=True,
+                        db_column="point_photo",
+                        null=True,
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.photo",
+                    ),
+                ),
+                (
+                    "point",
+                    models.ForeignKey(
+                        db_column="point",
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.point",
+                    ),
+                ),
+                (
+                    "survey",
+                    models.ForeignKey(
+                        db_column="survey",
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.survey",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'measurements',
+                "db_table": "measurements",
             },
         ),
         migrations.CreateModel(
-            name='Flight',
+            name="Flight",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('average_he', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('n_images', models.BigIntegerField(blank=True, null=True)),
-                ('n_controlp', models.BigIntegerField(blank=True, null=True)),
-                ('n_checkpoi', models.BigIntegerField(blank=True, null=True)),
-                ('average_gs', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('camera_nam', models.CharField(blank=True, max_length=254, null=True)),
-                ('focal_leng', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('sensor_siz', models.CharField(blank=True, max_length=254, null=True)),
-                ('image_size', models.CharField(blank=True, max_length=254, null=True)),
-                ('pixel_size', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('global_acc', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('x_accuracy', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('y_accuracy', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('z_accuracy', models.DecimalField(blank=True, decimal_places=5, max_digits=10, null=True)),
-                ('fk_surveys', models.ForeignKey(db_column='fk_surveys', on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.survey')),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                (
+                    "average_he",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                ("n_images", models.BigIntegerField(blank=True, null=True)),
+                ("n_controlp", models.BigIntegerField(blank=True, null=True)),
+                ("n_checkpoi", models.BigIntegerField(blank=True, null=True)),
+                (
+                    "average_gs",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                ("camera_nam", models.CharField(blank=True, max_length=254, null=True)),
+                (
+                    "focal_leng",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                ("sensor_siz", models.CharField(blank=True, max_length=254, null=True)),
+                ("image_size", models.CharField(blank=True, max_length=254, null=True)),
+                (
+                    "pixel_size",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                (
+                    "global_acc",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                (
+                    "x_accuracy",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                (
+                    "y_accuracy",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                (
+                    "z_accuracy",
+                    models.DecimalField(
+                        blank=True, decimal_places=5, max_digits=10, null=True
+                    ),
+                ),
+                (
+                    "fk_surveys",
+                    models.ForeignKey(
+                        db_column="fk_surveys",
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.survey",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'flights',
+                "db_table": "flights",
             },
         ),
         migrations.CreateModel(
-            name='SurveyHasInstrument',
+            name="SurveyHasInstrument",
             fields=[
-                ('id', models.IntegerField(primary_key=True, serialize=False)),
-                ('fk_instrum', models.ForeignKey(blank=True, db_column='fk_instrum', null=True, on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.instrument')),
-                ('fk_surveys', models.ForeignKey(blank=True, db_column='fk_surveys', null=True, on_delete=django.db.models.deletion.DO_NOTHING, to='surveys.survey')),
+                ("id", models.IntegerField(primary_key=True, serialize=False)),
+                (
+                    "fk_instrum",
+                    models.ForeignKey(
+                        blank=True,
+                        db_column="fk_instrum",
+                        null=True,
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.instrument",
+                    ),
+                ),
+                (
+                    "fk_surveys",
+                    models.ForeignKey(
+                        blank=True,
+                        db_column="fk_surveys",
+                        null=True,
+                        on_delete=django.db.models.deletion.DO_NOTHING,
+                        to="surveys.survey",
+                    ),
+                ),
             ],
             options={
-                'db_table': 'surveys_has_instruments',
+                "db_table": "surveys_has_instruments",
             },
         ),
     ]

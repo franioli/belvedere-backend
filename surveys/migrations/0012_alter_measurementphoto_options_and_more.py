@@ -4,18 +4,17 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0011_adopt_views'),
+        ("surveys", "0011_adopt_views"),
     ]
 
     operations = [
         migrations.AlterModelOptions(
-            name='measurementphoto',
-            options={'verbose_name': 'Measurement Monograph Photo'},
+            name="measurementphoto",
+            options={"verbose_name": "Measurement Monograph Photo"},
         ),
         migrations.AlterModelOptions(
-            name='surveyhasinstrument',
-            options={'verbose_name': 'Survey-Instrument association'},
+            name="surveyhasinstrument",
+            options={"verbose_name": "Survey-Instrument association"},
         ),
     ]

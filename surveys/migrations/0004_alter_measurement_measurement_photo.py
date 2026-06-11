@@ -5,15 +5,21 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0003_auto_20260605_2133'),
+        ("surveys", "0003_auto_20260605_2133"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='measurement',
-            name='measurement_photo',
-            field=models.OneToOneField(blank=True, db_column='point_photo', null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='measurement', to='surveys.measurementphoto'),
+            model_name="measurement",
+            name="measurement_photo",
+            field=models.OneToOneField(
+                blank=True,
+                db_column="point_photo",
+                null=True,
+                on_delete=django.db.models.deletion.SET_NULL,
+                related_name="measurement",
+                to="surveys.measurementphoto",
+            ),
         ),
     ]
