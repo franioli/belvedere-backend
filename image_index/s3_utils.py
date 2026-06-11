@@ -1,9 +1,10 @@
 import boto3
-from botocore.client import Config
+from botocore.client import BaseClient, Config
 from django.conf import settings
 
 
-def build_s3_client():
+def build_s3_client() -> BaseClient:
+    """Build and return a configured S3 client."""
     return boto3.client(
         "s3",
         endpoint_url=settings.S3_ENDPOINT_URL,
@@ -20,6 +21,14 @@ def build_s3_client():
     )
 
 
-def get_object_bytes(s3, bucket, key):
+def get_object_bytes(s3: BaseClient, bucket: str, key: str) -> tuple[bytes, str | None]:
+    """Fetch an object from S3 and return its bytes and content type."""
     response = s3.get_object(Bucket=bucket, Key=key)
     return response["Body"].read(), response.get("ContentType")
+
+
+def put_object_bytes(
+    s3: BaseClient, bucket: str, key: str, data: bytes, content_type: str
+) -> None:
+    """Store bytes in S3 with the given content type."""
+    s3.put_object(Bucket=bucket, Key=key, Body=data, ContentType=content_type)
