@@ -1,3 +1,4 @@
+import logging
 from io import BytesIO
 
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
@@ -16,6 +17,8 @@ from image_index.s3_utils import (
     get_object_bytes,
 )
 from image_index.serializers import CameraSerializer, ImageSerializer
+
+logger = logging.getLogger("belv")
 
 PREVIEW_SIZE = (1280, 960)
 THUMBNAIL_SIZE = (160, 120)
@@ -113,7 +116,8 @@ def serve_image(request: HttpRequest, pk: int) -> HttpResponse:
         s3 = build_s3_client()
         image_bytes, mime_type = get_object_bytes(s3, image.bucket, image.object_key)
     except Exception as exc:
-        raise Http404(f"Unable to load image: {exc}") from exc
+        logger.exception(f"S3 fetch failed for image pk={pk}")
+        raise Http404("Image not available") from exc
 
     return HttpResponse(
         image_bytes,
@@ -137,7 +141,8 @@ def serve_image_preview(request: HttpRequest, pk: int) -> HttpResponse:
             return response
         image_bytes, mime_type = get_object_bytes(s3, image.bucket, image.object_key)
     except Exception as exc:
-        raise Http404(f"Unable to load image: {exc}") from exc
+        logger.exception(f"S3 fetch failed for image pk={pk}")
+        raise Http404("Image not available") from exc
 
     return _build_resized_image_response(
         image_bytes,
@@ -163,7 +168,8 @@ def serve_image_thumbnail(request: HttpRequest, pk: int) -> HttpResponse:
             return response
         image_bytes, mime_type = get_object_bytes(s3, image.bucket, image.object_key)
     except Exception as exc:
-        raise Http404(f"Unable to load image: {exc}") from exc
+        logger.exception(f"S3 fetch failed for image pk={pk}")
+        raise Http404("Image not available") from exc
 
     return _build_resized_image_response(
         image_bytes,
@@ -187,7 +193,7 @@ def image_preview_url(request: HttpRequest, pk: int) -> JsonResponse:
         url = request.build_absolute_uri(
             reverse("image_index:serve_image_preview", args=[pk])
         )
-    return JsonResponse({"url": url, "expires_in": 3600})
+    return JsonResponse({"url": url, "expires_in": 900})
 
 
 @require_GET
@@ -204,4 +210,4 @@ def image_thumbnail_url(request: HttpRequest, pk: int) -> JsonResponse:
         url = request.build_absolute_uri(
             reverse("image_index:serve_image_thumbnail", args=[pk])
         )
-    return JsonResponse({"url": url, "expires_in": 3600})
+    return JsonResponse({"url": url, "expires_in": 900})
