@@ -16,6 +16,7 @@ CSRF_TRUSTED_ORIGINS = config(
 # Trust the X-Forwarded-Proto header set by the reverse proxy (Dokploy/Traefik/Nginx)
 # so that Django generates https:// URLs in API responses when behind TLS termination.
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
 
 S3_ENDPOINT_URL = config("S3_ENDPOINT_URL", default="")
 S3_ACCESS_KEY = config("S3_ACCESS_KEY", default="")
