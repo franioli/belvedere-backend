@@ -23,7 +23,7 @@ def compute_point_velocities(measurements: list[Measurement]) -> list[dict[str, 
 
     Returns:
         One record per valid consecutive pair:
-        ``{"survey_year": int, "survey_date_fin": date, "v": float}`` (m/day).
+        ``{"survey_year": int, "survey_date_ini": date, "survey_date_fin": date, "v": float}`` (m/day).
     """
     records: list[dict[str, Any]] = []
     for prev, curr in zip(measurements, measurements[1:], strict=False):
@@ -39,11 +39,10 @@ def compute_point_velocities(measurements: list[Measurement]) -> list[dict[str, 
         )
         if d <= 0:
             continue
-        records.append(
-            {
-                "survey_year": curr.survey.year,
-                "survey_date_fin": curr.survey.date,
-                "v": d / dt,
-            }
-        )
+        records.append({
+            "survey_year": curr.survey.year,
+            "survey_date_ini": prev.survey.date,
+            "survey_date_fin": curr.survey.date,
+            "v": d / dt,
+        })
     return records
