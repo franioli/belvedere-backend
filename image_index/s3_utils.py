@@ -35,7 +35,7 @@ def put_object_bytes(
 
 
 def generate_presigned_url(
-    s3: BaseClient, bucket: str, key: str, expires_in: int = 3600
+    s3: BaseClient, bucket: str, key: str, expires_in: int = 900
 ) -> str:
     """Return a presigned GET URL for an S3 object, valid for expires_in seconds."""
     return s3.generate_presigned_url(
