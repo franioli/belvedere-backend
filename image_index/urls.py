@@ -5,7 +5,6 @@ from image_index.views import (
     ImageListView,
     image_preview_url,
     image_thumbnail_url,
-    serve_image,
     serve_image_preview,
     serve_image_thumbnail,
 )
@@ -13,11 +12,6 @@ from image_index.views import (
 app_name = "image_index"
 
 urlpatterns = [
-    path(
-        "images/<int:pk>/",
-        serve_image,
-        name="serve_image",
-    ),
     path(
         "images/<int:pk>/preview/",
         serve_image_preview,
