@@ -1,6 +1,8 @@
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
 from django.contrib.gis.forms.widgets import OSMWidget
+from django.db.models import Count, Max, Min, QuerySet
+from django.http import HttpRequest
 from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
@@ -10,8 +12,11 @@ from .models import (
     Measurement,
     MeasurementPhoto,
     Point,
+    Product2D,
+    Product3D,
     Survey,
     SurveyHasInstrument,
+    Volume,
 )
 from .resources import MeasurementResource
 
@@ -69,16 +74,34 @@ class PointAdmin(admin.ModelAdmin):
         "first_survey_date",
         "last_survey_date",
         "num_measurements",
+        "notes",
     )
     search_fields = ("id", "label", "notes")
-    list_filter = (
-        "active",
-        "is_fixed",
-        "ref_date",
-        "first_survey_date",
-        "last_survey_date",
-    )
+    list_filter = ("active", "is_fixed", "ref_date")
     ordering = ("label", "id")
+
+    def get_queryset(self, request: HttpRequest) -> QuerySet[Point]:
+        return (
+            super()
+            .get_queryset(request)
+            .annotate(
+                _first_survey_date=Min("measurement__survey__date"),
+                _last_survey_date=Max("measurement__survey__date"),
+                _num_measurements=Count("measurement"),
+            )
+        )
+
+    @admin.display(ordering="_first_survey_date", description="First survey date")
+    def first_survey_date(self, obj: Point):
+        return getattr(obj, "_first_survey_date", None)
+
+    @admin.display(ordering="_last_survey_date", description="Last survey date")
+    def last_survey_date(self, obj: Point):
+        return getattr(obj, "_last_survey_date", None)
+
+    @admin.display(ordering="_num_measurements", description="Measurements")
+    def num_measurements(self, obj: Point):
+        return getattr(obj, "_num_measurements", None)
 
 
 class MapWidget(OSMWidget):
@@ -165,3 +188,54 @@ class MeasurementPhotoAdmin(admin.ModelAdmin):
         return "-"
 
     image_preview.short_description = "Preview"
+
+
+class BaseProductAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "survey",
+        "data_type",
+        "file_format",
+        "is_uploaded",
+        "object_key",
+        "file_size_bytes",
+    )
+    search_fields = ("id", "survey__id", "data_type", "object_key", "path")
+    list_filter = ("data_type", "is_uploaded", "survey")
+    raw_id_fields = ("survey",)
+    readonly_fields = ("s3_etag", "s3_last_modified", "is_uploaded", "file_link")
+    ordering = ("survey__year", "id")
+
+    @admin.display(description="S3 URL")
+    def file_link(self, obj):
+        if obj and obj.file_path:
+            return format_html(
+                '<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>',
+                obj.file_path,
+                obj.file_path,
+            )
+        return "-"
+
+
+@admin.register(Product2D)
+class Product2DAdmin(BaseProductAdmin):
+    pass
+
+
+@admin.register(Product3D)
+class Product3DAdmin(BaseProductAdmin):
+    pass
+
+
+@admin.register(Volume)
+class VolumeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "survey_prev",
+        "survey",
+        "dv",
+        "density",
+        "density_uncertainty",
+    )
+    raw_id_fields = ("survey", "survey_prev")
+    ordering = ("survey__year",)

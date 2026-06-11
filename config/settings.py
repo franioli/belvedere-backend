@@ -24,6 +24,7 @@ S3_SECRET_KEY = config("S3_SECRET_KEY", default="")
 S3_READONLY_ACCESS_KEY = config("S3_READONLY_ACCESS_KEY", default="")
 S3_READONLY_SECRET_KEY = config("S3_READONLY_SECRET_KEY", default="")
 S3_BUCKET_NAME = config("S3_BUCKET_NAME", default="belvedere-images")
+S3_PRODUCTS_BUCKET_NAME = config("S3_PRODUCTS_BUCKET_NAME", default="belvedere-products")
 S3_REGION_NAME = config("S3_REGION_NAME", default="nbg1")
 
 # Optional path to a PNG logo file composited onto generated previews (bottom-right corner).
@@ -101,7 +102,7 @@ DATABASES = {
         "PASSWORD": config("DB_PASSWORD", default="belvedere"),
         "HOST": config("DB_HOST", default="localhost"),
         "PORT": config("DB_PORT", default="5432"),
-        "OPTIONS": {"options": "-c search_path=public,core"},
+        "OPTIONS": {"options": "-c search_path=public"},
     }
 }
 
