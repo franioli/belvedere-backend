@@ -21,6 +21,8 @@ USE_X_FORWARDED_HOST = True
 S3_ENDPOINT_URL = config("S3_ENDPOINT_URL", default="")
 S3_ACCESS_KEY = config("S3_ACCESS_KEY", default="")
 S3_SECRET_KEY = config("S3_SECRET_KEY", default="")
+S3_READONLY_ACCESS_KEY = config("S3_READONLY_ACCESS_KEY", default="")
+S3_READONLY_SECRET_KEY = config("S3_READONLY_SECRET_KEY", default="")
 S3_BUCKET_NAME = config("S3_BUCKET_NAME", default="belvedere-images")
 S3_REGION_NAME = config("S3_REGION_NAME", default="nbg1")
 
@@ -57,11 +59,16 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True
-# CORS_ALLOWED_ORIGINS = [
-#     "http://localhost:3000",
-#     "http://127.0.0.1:3000",
-# ]
+_cors_origins = config("CORS_ALLOWED_ORIGINS", default="")
+if _cors_origins:
+    CORS_ALLOWED_ORIGINS = [o.strip() for o in _cors_origins.split(",") if o.strip()]
+else:
+    CORS_ALLOW_ALL_ORIGINS = True
+
+REST_FRAMEWORK = {
+    "DEFAULT_THROTTLE_CLASSES": ["rest_framework.throttling.AnonRateThrottle"],
+    "DEFAULT_THROTTLE_RATES": {"anon": "300/minute"},
+}
 
 ROOT_URLCONF = "config.urls"
 

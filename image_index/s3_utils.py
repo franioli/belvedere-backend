@@ -3,13 +3,12 @@ from botocore.client import BaseClient, Config
 from django.conf import settings
 
 
-def build_s3_client() -> BaseClient:
-    """Build and return a configured S3 client."""
+def _make_s3_client(access_key: str, secret_key: str) -> BaseClient:
     return boto3.client(
         "s3",
         endpoint_url=settings.S3_ENDPOINT_URL,
-        aws_access_key_id=settings.S3_ACCESS_KEY,
-        aws_secret_access_key=settings.S3_SECRET_KEY,
+        aws_access_key_id=access_key,
+        aws_secret_access_key=secret_key,
         region_name=settings.S3_REGION_NAME,
         config=Config(
             signature_version="s3v4",
@@ -19,6 +18,21 @@ def build_s3_client() -> BaseClient:
             },
         ),
     )
+
+
+def build_s3_client() -> BaseClient:
+    """Build an S3 client using the read-write credentials."""
+    return _make_s3_client(settings.S3_ACCESS_KEY, settings.S3_SECRET_KEY)
+
+
+def build_readonly_s3_client() -> BaseClient:
+    """Build an S3 client using read-only credentials.
+
+    Falls back to the read-write credentials if read-only keys are not configured.
+    """
+    access_key = getattr(settings, "S3_READONLY_ACCESS_KEY", "") or settings.S3_ACCESS_KEY
+    secret_key = getattr(settings, "S3_READONLY_SECRET_KEY", "") or settings.S3_SECRET_KEY
+    return _make_s3_client(access_key, secret_key)
 
 
 def get_object_bytes(s3: BaseClient, bucket: str, key: str) -> tuple[bytes, str | None]:
