@@ -18,8 +18,9 @@ nohup.out
 _old/
 
 
-context/
-CLAUDE.md
+# claude
+# context/
+# CLAUDE.md
 
 # SMB credentials - never commit these!
 smb_credentials.txt

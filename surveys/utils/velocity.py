@@ -39,10 +39,12 @@ def compute_point_velocities(measurements: list[Measurement]) -> list[dict[str, 
         )
         if d <= 0:
             continue
-        records.append({
-            "survey_year": curr.survey.year,
-            "survey_date_ini": prev.survey.date,
-            "survey_date_fin": curr.survey.date,
-            "v": d / dt,
-        })
+        records.append(
+            {
+                "survey_year": curr.survey.year,
+                "survey_date_ini": prev.survey.date,
+                "survey_date_fin": curr.survey.date,
+                "v": d / dt,
+            }
+        )
     return records
