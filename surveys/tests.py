@@ -6,7 +6,32 @@ from django.core.management import call_command
 from django.db.models import ProtectedError
 from django.test import TestCase, override_settings
 
-from surveys.models import Product2D, Product3D, Survey, Volume
+from surveys.models import (
+    ActivePoint,
+    PointsMeasurement,
+    PointsMovementFiltered,
+    PointsMovementRaw,
+    Product2D,
+    Product3D,
+    Survey,
+    Volume,
+)
+
+
+class DatabaseViewTests(TestCase):
+    """The migration-managed views must exist on a freshly migrated database
+    and be queryable through their unmanaged models."""
+
+    VIEW_MODELS = (
+        PointsMeasurement,
+        PointsMovementRaw,
+        PointsMovementFiltered,
+        ActivePoint,
+    )
+
+    def test_views_exist_and_are_queryable(self):
+        for model in self.VIEW_MODELS:
+            self.assertEqual(model.objects.count(), 0)
 
 
 class ProductModelTests(TestCase):
@@ -56,7 +81,7 @@ class IndexS3ProductsCommandTests(TestCase):
             data_type="ortofoto",
             object_key="products_2d/1977/orto.tif",
         )
-        self.last_modified = datetime.datetime(2026, 6, 1, tzinfo=datetime.timezone.utc)
+        self.last_modified = datetime.datetime(2026, 6, 1, tzinfo=datetime.UTC)
         self.s3 = Mock()
         paginator = Mock()
         paginator.paginate.return_value = [

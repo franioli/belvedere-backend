@@ -307,7 +307,108 @@ class Volume(models.Model):
         return f"Volume {self.pk} - surveys {self.survey_prev_id}→{self.survey_id}"
 
 
-# Unmanaged legacy tables (NOT modelled in Django):
+# ================ Database views (read-only) ================
+# Unmanaged models over the Postgres views created in migration 0011.
+# Django never writes to them; any change to a view definition must go
+# through a new migration.
+
+
+class PointsMeasurement(models.Model):
+    """Row of the `points_measurements` view (measurement + point + survey join)."""
+
+    id = models.IntegerField(primary_key=True)
+    label = models.CharField(max_length=45)
+    point_id = models.IntegerField()
+    is_fixed = models.BooleanField()
+    east = models.FloatField()
+    north = models.FloatField()
+    h = models.FloatField()
+    h_orto = models.FloatField(null=True)
+    lat = models.FloatField(null=True)
+    lon = models.FloatField(null=True)
+    survey_id = models.IntegerField()
+    survey_date = models.DateField(null=True)
+    survey_year = models.BigIntegerField(null=True)
+    meas_date = models.DateField(null=True)
+    meas_time = models.DateTimeField(null=True)
+    meas_strategy = models.CharField(max_length=25, null=True)
+    ds_east = models.FloatField(null=True)
+    ds_north = models.FloatField(null=True)
+    ds_h = models.FloatField(null=True)
+
+    class Meta:
+        managed = False
+        db_table = "points_measurements"
+        verbose_name = "Points measurement (read-only view)"
+        verbose_name_plural = "Points measurements (read-only view)"
+
+    def __str__(self):
+        return f"{self.label} @ {self.survey_year}"
+
+
+class PointsMovementBase(models.Model):
+    """Common columns of the `points_movement_*` views."""
+
+    id = models.IntegerField(primary_key=True)
+    label = models.CharField(max_length=45)
+    survey_year = models.BigIntegerField(null=True)
+    is_fixed = models.BooleanField()
+    survey_date_fin = models.DateField(null=True)
+    survey_date_prev = models.DateField(null=True)
+    dt = models.IntegerField(help_text="Days between the two surveys.")
+    d_e = models.FloatField()
+    d_n = models.FloatField()
+    d_h = models.FloatField()
+    d = models.FloatField(help_text="3D displacement in metres.")
+    v = models.FloatField(help_text="Velocity in m/day.")
+    a = models.FloatField(help_text="Acceleration in m/day².")
+
+    class Meta:
+        abstract = True
+
+    def __str__(self):
+        return f"{self.label} {self.survey_date_prev}→{self.survey_date_fin}"
+
+
+class PointsMovementRaw(PointsMovementBase):
+    class Meta(PointsMovementBase.Meta):
+        managed = False
+        db_table = "points_movement_raw"
+        verbose_name = "Points movement raw (read-only view)"
+        verbose_name_plural = "Points movements raw (read-only view)"
+
+
+class PointsMovementFiltered(PointsMovementBase):
+    class Meta(PointsMovementBase.Meta):
+        managed = False
+        db_table = "points_movement_filtered"
+        verbose_name = "Points movement filtered (read-only view)"
+        verbose_name_plural = "Points movements filtered (read-only view)"
+
+
+class ActivePoint(models.Model):
+    """Row of the `active_points` view (latest measurement per active point)."""
+
+    meas_id = models.IntegerField(primary_key=True)
+    label = models.CharField(max_length=45)
+    last_measure_date = models.DateField(null=True)
+    east = models.FloatField()
+    north = models.FloatField()
+    h = models.FloatField()
+    is_fixed = models.BooleanField()
+
+    class Meta:
+        managed = False
+        db_table = "active_points"
+        verbose_name = "Active point (read-only view)"
+        verbose_name_plural = "Active points (read-only view)"
+
+    def __str__(self):
+        return f"{self.label} ({self.last_measure_date})"
+
+
+# =========== Unmanaged legacy tables (NOT modelled in Django) ==============
+
 #   - scatter_points, scatter_measurements: legacy scatter manual displacement points kept in the DB for reference.
 #   - layer_styles, qgis_projects: owned and managed by QGIS.
 #   - raster.geoid_model: geoid raster sampled by the compute_measurement_geometry

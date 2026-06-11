@@ -7,11 +7,15 @@ from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
 from .models import (
+    ActivePoint,
     Flight,
     Instrument,
     Measurement,
     MeasurementPhoto,
     Point,
+    PointsMeasurement,
+    PointsMovementFiltered,
+    PointsMovementRaw,
     Product2D,
     Product3D,
     Survey,
@@ -239,3 +243,76 @@ class VolumeAdmin(admin.ModelAdmin):
     )
     raw_id_fields = ("survey", "survey_prev")
     ordering = ("survey__year",)
+
+
+class ReadOnlyViewAdmin(admin.ModelAdmin):
+    """Browse-only admin for the unmanaged models mapped onto Postgres views."""
+
+    def has_add_permission(self, request: HttpRequest) -> bool:
+        return False
+
+    def has_change_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+    def has_delete_permission(self, request: HttpRequest, obj=None) -> bool:
+        return False
+
+
+@admin.register(PointsMeasurement)
+class PointsMeasurementAdmin(ReadOnlyViewAdmin):
+    list_display = (
+        "id",
+        "label",
+        "survey_year",
+        "survey_date",
+        "east",
+        "north",
+        "h",
+        "h_orto",
+        "is_fixed",
+        "meas_strategy",
+    )
+    search_fields = ("label",)
+    list_filter = ("survey_year", "is_fixed", "meas_strategy")
+    ordering = ("-survey_year", "label")
+
+
+class PointsMovementAdmin(ReadOnlyViewAdmin):
+    list_display = (
+        "label",
+        "survey_year",
+        "survey_date_prev",
+        "survey_date_fin",
+        "dt",
+        "d",
+        "v",
+        "a",
+    )
+    search_fields = ("label",)
+    list_filter = ("survey_year", "is_fixed")
+    ordering = ("label", "-survey_date_fin")
+
+
+@admin.register(PointsMovementRaw)
+class PointsMovementRawAdmin(PointsMovementAdmin):
+    pass
+
+
+@admin.register(PointsMovementFiltered)
+class PointsMovementFilteredAdmin(PointsMovementAdmin):
+    pass
+
+
+@admin.register(ActivePoint)
+class ActivePointAdmin(ReadOnlyViewAdmin):
+    list_display = (
+        "label",
+        "last_measure_date",
+        "east",
+        "north",
+        "h",
+        "is_fixed",
+    )
+    search_fields = ("label",)
+    list_filter = ("is_fixed",)
+    ordering = ("label",)
