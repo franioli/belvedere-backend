@@ -4,6 +4,7 @@ from django import forms
 from django.contrib import admin
 from django.contrib.gis import admin as gis_admin
 from django.contrib.gis.forms.widgets import OSMWidget
+from django.contrib.gis.geos import Point
 from django.db.models import Count, Max, Min
 from django.urls import reverse
 from django.utils.html import format_html
@@ -30,7 +31,8 @@ class CameraAdmin(gis_admin.GISModelAdmin):
     list_display = (
         "id",
         "camera_name",
-        "serial_number",
+        "slug",
+        "notes",
         "model",
         "lens",
         "installation_date",
@@ -49,6 +51,16 @@ class CameraAdmin(gis_admin.GISModelAdmin):
     )
     readonly_fields = ("id", "created_at")
     ordering = ("camera_name",)
+
+    def save_model(self, request, obj, form, change):
+        # OSMWidget always produces 2D points; the location column requires 3D.
+        # Inject Z from elevation, falling back to 0 if not set.
+        if obj.location is not None and not obj.location.hasz:
+            z = obj.elevation if obj.elevation is not None else 0.0
+            obj.location = Point(
+                obj.location.x, obj.location.y, z, srid=obj.location.srid
+            )
+        super().save_model(request, obj, form, change)
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)

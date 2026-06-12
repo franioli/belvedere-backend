@@ -95,6 +95,21 @@ class Camera(models.Model):
         blank=True,
         help_text="Nominal focal length in millimeters.",
     )
+    sensor_width = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Sensor width in pixels.",
+    )
+    sensor_height = models.IntegerField(
+        null=True,
+        blank=True,
+        help_text="Sensor height in pixels.",
+    )
+    resolution_Mpx = models.FloatField(
+        null=True,
+        blank=True,
+        help_text="Sensor resolution in megapixels",
+    )
     sensor_width_mm = models.FloatField(
         null=True,
         blank=True,
