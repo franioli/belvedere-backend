@@ -106,7 +106,7 @@ class Point(models.Model):
         db_table = "points"
 
     def __str__(self):
-        return f"Point {self.id} - {self.label}"
+        return f"Point {self.label} (ID {self.id})"
 
 
 class Measurement(models.Model):
@@ -130,6 +130,11 @@ class Measurement(models.Model):
 
     class Meta:
         db_table = "measurements"
+
+    def __str__(self):
+        return (
+            f"Measurement {self.id} - Point {self.point_id} @ Survey {self.survey_id}"
+        )
 
 
 def measurement_photo_upload_to(instance, filename):
