@@ -1,7 +1,5 @@
 import os
-from urllib.parse import quote
 
-from django.conf import settings
 from django.contrib.gis.db import models
 
 # ================ Survey and Instrument Models ================
@@ -53,25 +51,25 @@ class SurveyHasInstrument(models.Model):
 class Flight(models.Model):
     id = models.IntegerField(primary_key=True)
     fk_surveys = models.ForeignKey(Survey, models.DO_NOTHING, db_column="fk_surveys")
-    average_he = models.DecimalField(
+    average_height = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
     )
     n_images = models.BigIntegerField(blank=True, null=True)
-    n_controlp = models.BigIntegerField(blank=True, null=True)
-    n_checkpoi = models.BigIntegerField(blank=True, null=True)
-    average_gs = models.DecimalField(
+    n_controlpoints = models.BigIntegerField(blank=True, null=True)
+    n_checkpoints = models.BigIntegerField(blank=True, null=True)
+    average_gsd = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
     )
-    camera_nam = models.CharField(max_length=254, blank=True, null=True)
-    focal_leng = models.DecimalField(
+    camera_name = models.CharField(max_length=254, blank=True, null=True)
+    focal_length = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
     )
-    sensor_siz = models.CharField(max_length=254, blank=True, null=True)
+    sensor_size = models.CharField(max_length=254, blank=True, null=True)
     image_size = models.CharField(max_length=254, blank=True, null=True)
     pixel_size = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
     )
-    global_acc = models.DecimalField(
+    global_accuracy = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
     )
     x_accuracy = models.DecimalField(
@@ -189,21 +187,17 @@ class MeasurementPhoto(models.Model):
 # ================ Survey Products and Volumes ================
 
 
-class BaseProduct(models.Model):
-    """Common metadata for survey data products stored on S3.
-
-    Suggested S3 key convention inside the products bucket:
-    ``<db_table>/<survey_year>/<filename>`` (e.g. ``products_2d/1977/1977_ortofoto_50cm.tif``).
-    """
+class Product2D(models.Model):
+    """Raster product of a survey (orthophoto, DSM, ...) served via WMS."""
 
     survey = models.ForeignKey(
         Survey,
         on_delete=models.PROTECT,
-        related_name="%(class)s_products",
+        related_name="products_2d",
     )
     data_type = models.CharField(
         max_length=64,
-        help_text="Product type, e.g. ortofoto, dsm, pointcloud, mesh.",
+        help_text="Product type, e.g. ortofoto, dsm.",
     )
     file_format = models.CharField(max_length=32, blank=True, null=True)
     reference_system = models.CharField(max_length=254, blank=True, null=True)
@@ -211,87 +205,65 @@ class BaseProduct(models.Model):
     proj4 = models.CharField(max_length=512, blank=True, null=True)
     bounding_box = models.CharField(max_length=254, blank=True, null=True)
     license = models.CharField(max_length=64, blank=True, null=True)
-    path = models.CharField(
-        max_length=512,
-        blank=True,
-        null=True,
-        help_text="Legacy local file path (pre-S3).",
-    )
-
-    # S3 object reference (mirrors image_index.Image)
-    bucket = models.CharField(
-        max_length=255,
-        blank=True,
-        null=True,
-        help_text="S3 bucket containing the product object. Null until uploaded.",
-    )
-    object_key = models.CharField(
-        max_length=1024,
-        blank=True,
-        null=True,
-        help_text="Full S3 object key inside the bucket. Null until uploaded.",
-    )
-    s3_etag = models.CharField(max_length=128, blank=True, null=True)
-    s3_last_modified = models.DateTimeField(blank=True, null=True)
-    file_size_bytes = models.BigIntegerField(blank=True, null=True)
-    is_uploaded = models.BooleanField(
-        default=False,
-        help_text="Whether the product file is present in S3 (set by index_s3_products).",
-    )
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    class Meta:
-        abstract = True
-        constraints = [
-            models.UniqueConstraint(
-                fields=["bucket", "object_key"],
-                name="unique_%(class)s_bucket_object_key",
-            ),
-        ]
-
-    @property
-    def file_path(self) -> str:
-        """Public URL of the S3 object, empty if not uploaded yet."""
-        endpoint = (getattr(settings, "S3_ENDPOINT_URL", "") or "").rstrip("/")
-        if not endpoint or not self.bucket or not self.object_key:
-            return ""
-        return f"{endpoint}/{self.bucket}/{quote(self.object_key, safe='/')}"
-
-    def __str__(self):
-        return f"{type(self).__name__} {self.pk} - {self.data_type} (survey {self.survey_id})"
-
-
-class Product2D(BaseProduct):
-    """Raster product of a survey (orthophoto, DSM, ...)."""
-
     pixel_size = models.FloatField(
         blank=True, null=True, help_text="Ground pixel size in metres."
     )
     n_bands = models.IntegerField(blank=True, null=True)
+    wms_url = models.URLField(
+        max_length=1024,
+        blank=True,
+        null=True,
+        help_text="WMS endpoint URL on GeoServer.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta(BaseProduct.Meta):
+    class Meta:
         db_table = "products_2d"
         verbose_name = "2D product"
 
+    def __str__(self) -> str:
+        return f"Product2D {self.pk} - {self.data_type} (survey {self.survey_id})"
 
-class Product3D(BaseProduct):
-    """3D product of a survey (point cloud, mesh, ...)."""
 
+class Product3D(models.Model):
+    """3D product of a survey (point cloud, mesh, ...) with a direct URL."""
+
+    survey = models.ForeignKey(
+        Survey,
+        on_delete=models.PROTECT,
+        related_name="products_3d",
+    )
+    data_type = models.CharField(
+        max_length=64,
+        help_text="Product type, e.g. pointcloud, mesh.",
+    )
+    file_format = models.CharField(max_length=32, blank=True, null=True)
+    reference_system = models.CharField(max_length=254, blank=True, null=True)
+    epsg = models.IntegerField(blank=True, null=True)
+    bounding_box = models.CharField(max_length=254, blank=True, null=True)
+    license = models.CharField(max_length=64, blank=True, null=True)
     average_point_spacing = models.FloatField(
         blank=True, null=True, help_text="Average point spacing in metres."
     )
     n_points = models.BigIntegerField(blank=True, null=True)
     n_nodes = models.BigIntegerField(blank=True, null=True)
     n_scalar_fields = models.IntegerField(blank=True, null=True)
-    texture = models.BooleanField(
-        blank=True, null=True, help_text="Whether the mesh has a texture."
+    url = models.URLField(
+        max_length=1024,
+        blank=True,
+        null=True,
+        help_text="Direct URL to the COPC point cloud (Zenodo, S3, etc.).",
     )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
-    class Meta(BaseProduct.Meta):
+    class Meta:
         db_table = "products_3d"
         verbose_name = "3D product"
+
+    def __str__(self) -> str:
+        return f"Product3D {self.pk} - {self.data_type} (survey {self.survey_id})"
 
 
 class Volume(models.Model):

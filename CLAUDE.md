@@ -25,7 +25,6 @@ uv run python manage.py test                     # all tests
 uv run python manage.py test surveys.tests.TestClass.test_method  # single test
 uv run ruff check . && uv run ruff format .      # lint + format
 uv run python manage.py index_s3_images [--camera-id ID] [--dry-run] [--force] [--workers N]
-uv run python manage.py index_s3_products [--bucket B] [--dry-run]
 uv run python manage.py collectstatic --noinput  # production
 ```
 

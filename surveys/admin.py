@@ -55,14 +55,14 @@ class FlightAdmin(admin.ModelAdmin):
     list_display = (
         "id",
         "fk_surveys",
-        "camera_nam",
+        "camera_name",
         "n_images",
-        "average_he",
-        "average_gs",
-        "global_acc",
+        "average_height",
+        "average_gsd",
+        "global_accuracy",
     )
-    search_fields = ("id", "camera_nam", "fk_surveys__id")
-    list_filter = ("fk_surveys", "camera_nam")
+    search_fields = ("id", "camera_name", "fk_surveys__id")
+    list_filter = ("fk_surveys", "camera_name")
     raw_id_fields = ("fk_surveys",)
     ordering = ("id",)
 
@@ -195,40 +195,20 @@ class MeasurementPhotoAdmin(admin.ModelAdmin):
 
 
 class BaseProductAdmin(admin.ModelAdmin):
-    list_display = (
-        "id",
-        "survey",
-        "data_type",
-        "file_format",
-        "is_uploaded",
-        "object_key",
-        "file_size_bytes",
-    )
-    search_fields = ("id", "survey__id", "data_type", "object_key", "path")
-    list_filter = ("data_type", "is_uploaded", "survey")
+    search_fields = ("id", "survey__id", "data_type")
+    list_filter = ("data_type", "survey")
     raw_id_fields = ("survey",)
-    readonly_fields = ("s3_etag", "s3_last_modified", "is_uploaded", "file_link")
     ordering = ("survey__year", "id")
-
-    @admin.display(description="S3 URL")
-    def file_link(self, obj):
-        if obj and obj.file_path:
-            return format_html(
-                '<a href="{}" target="_blank" rel="noopener noreferrer">{}</a>',
-                obj.file_path,
-                obj.file_path,
-            )
-        return "-"
 
 
 @admin.register(Product2D)
 class Product2DAdmin(BaseProductAdmin):
-    pass
+    list_display = ("id", "survey", "data_type", "file_format", "wms_url")
 
 
 @admin.register(Product3D)
 class Product3DAdmin(BaseProductAdmin):
-    pass
+    list_display = ("id", "survey", "data_type", "file_format", "url")
 
 
 @admin.register(Volume)
