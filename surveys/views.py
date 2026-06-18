@@ -13,7 +13,8 @@ from .utils.velocity import compute_point_velocities
 def survey_years(request: Request) -> Response:
     """List distinct years of surveys that have measurements, ascending."""
     years = (
-        Survey.objects.filter(measurement__isnull=False)
+        Survey.objects
+        .filter(measurement__isnull=False)
         .order_by("year")
         .values_list("year", flat=True)
         .distinct()
@@ -22,7 +23,7 @@ def survey_years(request: Request) -> Response:
 
 
 class MeasurementListView(ListAPIView):
-    """List measurements with point/survey context (unpaginated).
+    """List measurements with point/survey context.
 
     Query params:
         year: survey year (e.g. 2023)
@@ -52,7 +53,8 @@ def point_velocity(request: Request, label: str) -> Response:
     Returns an empty list for unknown or fixed points (legacy behaviour).
     """
     measurements = list(
-        Measurement.objects.filter(point__label=label, point__is_fixed=False)
+        Measurement.objects
+        .filter(point__label=label, point__is_fixed=False)
         .select_related("survey")
         .order_by("survey__date")
     )
