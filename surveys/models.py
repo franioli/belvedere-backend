@@ -6,7 +6,7 @@ from django.contrib.gis.db import models
 
 
 class Survey(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     date = models.DateField(blank=True, null=True)
     year = models.BigIntegerField(blank=True, null=True)
     notes = models.CharField(max_length=254, blank=True, null=True)
@@ -19,7 +19,7 @@ class Survey(models.Model):
 
 
 class Instrument(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=254, blank=True, null=True)
     type = models.CharField(max_length=254, blank=True, null=True)
     specificat = models.CharField(max_length=254, blank=True, null=True)
@@ -35,7 +35,7 @@ class Instrument(models.Model):
 
 
 class SurveyHasInstrument(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     fk_surveys = models.ForeignKey(
         Survey, models.DO_NOTHING, db_column="fk_surveys", blank=True, null=True
     )
@@ -49,7 +49,7 @@ class SurveyHasInstrument(models.Model):
 
 
 class Flight(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     fk_surveys = models.ForeignKey(Survey, models.DO_NOTHING, db_column="fk_surveys")
     average_height = models.DecimalField(
         max_digits=10, decimal_places=5, blank=True, null=True
@@ -93,7 +93,7 @@ class Flight(models.Model):
 
 
 class Point(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     label = models.CharField(max_length=45, blank=True, null=True)
     active = models.BooleanField(blank=True, null=True)
     is_fixed = models.BooleanField(blank=True, null=True)
@@ -108,7 +108,7 @@ class Point(models.Model):
 
 
 class Measurement(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     geom = models.PointField(srid=32632, blank=True, null=True)
     east = models.FloatField()
     north = models.FloatField()
@@ -143,7 +143,7 @@ def measurement_photo_upload_to(instance, filename):
 
 
 class MeasurementPhoto(models.Model):
-    id = models.IntegerField(primary_key=True)  # keep as-is
+    id = models.AutoField(primary_key=True)
     measurement = models.OneToOneField(
         "Measurement",
         on_delete=models.CASCADE,

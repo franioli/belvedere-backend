@@ -1,4 +1,3 @@
-# survey/resources.py
 import logging
 
 from django.contrib.gis.geos import Point as GEOSPoint
@@ -105,7 +104,5 @@ class MeasurementResource(resources.ModelResource):
     def after_import(self, dataset, result, **kwargs):
         if self.created_points:
             logger.warning(
-                "Measurement import completed with %s auto-created points:\n%s",
-                len(self.created_points),
-                "\n".join(self.created_points),
+                f"Measurement import completed with {len(self.created_points)} auto-created points:\n{chr(10).join(self.created_points)}",
             )
