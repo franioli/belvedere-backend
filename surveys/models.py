@@ -99,6 +99,7 @@ class Point(models.Model):
     is_fixed = models.BooleanField(blank=True, null=True)
     ref_date = models.DateField(blank=True, null=True)
     notes = models.CharField(max_length=512, blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = "points"
@@ -125,6 +126,7 @@ class Measurement(models.Model):
     lat = models.FloatField(blank=True, null=True)
     lon = models.FloatField(blank=True, null=True)
     h_orto = models.FloatField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = "measurements"
