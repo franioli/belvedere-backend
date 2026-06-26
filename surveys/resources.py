@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime
 
 from django.contrib.gis.geos import Point as GEOSPoint
 from django.core.exceptions import ValidationError
@@ -77,11 +78,18 @@ class MeasurementResource(resources.ModelResource):
             logger.warning(msg)
 
         try:
-            survey = Survey.objects.get(date=survey_date)
+            survey_date_parsed = datetime.strptime(survey_date, "%d/%m/%Y").date()
+        except ValueError:
+            raise ValidationError(
+                f"Invalid date format '{survey_date}'. Expected DD/MM/YYYY."
+            )
+
+        try:
+            survey = Survey.objects.get(date=survey_date_parsed)
         except Survey.DoesNotExist:
-            raise ValidationError(f"Survey not found for date='{survey_date}'")
+            raise ValidationError(f"Survey not found for date='{survey_date}'") from None
         except Survey.MultipleObjectsReturned:
-            raise ValidationError(f"Multiple Surveys found for date='{survey_date}'")
+            raise ValidationError(f"Multiple Surveys found for date='{survey_date}'") from None
 
         row["point"] = point.pk
         row["survey"] = survey.pk
