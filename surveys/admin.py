@@ -79,10 +79,12 @@ class PointAdmin(admin.ModelAdmin):
         "last_survey_date",
         "num_measurements",
         "notes",
+        "created_at",
     )
     search_fields = ("id", "label", "notes")
     list_filter = ("active", "is_fixed", "ref_date")
     ordering = ("label", "id")
+    readonly_fields = ("created_at",)
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Point]:
         return (
@@ -128,6 +130,7 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
         "north",
         "h",
         "meas_strategy",
+        "created_at",
     )
     search_fields = (
         "id",
@@ -140,7 +143,7 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
     list_filter = ("survey", "meas_date", "meas_strategy")
     raw_id_fields = ("point", "survey")
     ordering = ("-meas_date", "-id")
-    readonly_fields = ()
+    readonly_fields = ("created_at",)
 
     fieldsets = (
         (
@@ -161,6 +164,7 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
                     "lon",
                     "h_orto",
                     "notes",
+                    "created_at",
                 )
             },
         ),
