@@ -17,13 +17,17 @@ class MeasurementResource(resources.ModelResource):
         attribute="meas_date",
         widget=DateWidget(format="%Y-%m-%d"),
     )
+    point_label = fields.Field(column_name="point_label")
+    survey_date = fields.Field(column_name="survey_date")
 
     class Meta:
         model = Measurement
         fields = (
             "id",
             "point",
+            "point_label",
             "survey",
+            "survey_date",
             "east",
             "north",
             "h",
@@ -41,6 +45,13 @@ class MeasurementResource(resources.ModelResource):
         skip_unchanged = False
         report_skipped = True
 
+    def dehydrate_point_label(self, obj: Measurement) -> str:
+        return obj.point.label or ""
+
+    def dehydrate_survey_date(self, obj: Measurement) -> str:
+        d = obj.survey.date
+        return d.strftime("%d/%m/%Y") if d else ""
+
     def before_import(self, dataset, **kwargs):
         self.created_points = []
 
@@ -51,8 +62,12 @@ class MeasurementResource(resources.ModelResource):
         if not point_label:
             raise ValidationError("Missing required column/value: point_label")
 
-        if not survey_date:
-            raise ValidationError("Missing required column/value: survey_date")
+        survey_id_raw = (row.get("survey_id") or "").strip()
+
+        if not survey_id_raw and not survey_date:
+            raise ValidationError(
+                "Missing required column: provide 'survey_id' or 'survey_date'."
+            )
 
         if row.get("east") in (None, ""):
             raise ValidationError("Missing required column/value: east")
@@ -77,19 +92,34 @@ class MeasurementResource(resources.ModelResource):
             self.created_points.append(msg)
             logger.warning(msg)
 
-        try:
-            survey_date_parsed = datetime.strptime(survey_date, "%d/%m/%Y").date()
-        except ValueError:
-            raise ValidationError(
-                f"Invalid date format '{survey_date}'. Expected DD/MM/YYYY."
-            )
-
-        try:
-            survey = Survey.objects.get(date=survey_date_parsed)
-        except Survey.DoesNotExist:
-            raise ValidationError(f"Survey not found for date='{survey_date}'") from None
-        except Survey.MultipleObjectsReturned:
-            raise ValidationError(f"Multiple Surveys found for date='{survey_date}'") from None
+        if survey_id_raw:
+            try:
+                survey = Survey.objects.get(pk=int(survey_id_raw))
+            except (ValueError, TypeError):
+                raise ValidationError(
+                    f"Invalid survey_id '{survey_id_raw}': must be an integer."
+                ) from None
+            except Survey.DoesNotExist:
+                raise ValidationError(
+                    f"Survey not found for id='{survey_id_raw}'."
+                ) from None
+        else:
+            try:
+                survey_date_parsed = datetime.strptime(survey_date, "%d/%m/%Y").date()
+            except ValueError:
+                raise ValidationError(
+                    f"Invalid date format '{survey_date}'. Expected DD/MM/YYYY."
+                ) from None
+            try:
+                survey = Survey.objects.get(date=survey_date_parsed)
+            except Survey.DoesNotExist:
+                raise ValidationError(
+                    f"Survey not found for date='{survey_date}'."
+                ) from None
+            except Survey.MultipleObjectsReturned:
+                raise ValidationError(
+                    f"Multiple surveys found for date='{survey_date}'. Use survey_id instead."
+                ) from None
 
         row["point"] = point.pk
         row["survey"] = survey.pk

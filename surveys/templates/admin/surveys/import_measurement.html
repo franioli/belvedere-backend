@@ -1,0 +1,57 @@
+{% extends "admin/import_export/import.html" %}
+{% load i18n %}
+
+{% block import_form_additional_info %}
+<div style="margin: 1em 0; padding: 1em; background: #f8f8f8; border-left: 4px solid #447e9b; font-size: 0.9em;">
+  <h3 style="margin-top: 0;">CSV format</h3>
+  <p>Upload a UTF-8 CSV file. The first row must be a header. Column names are case-sensitive.</p>
+
+  <h4>Point matching</h4>
+  <p>
+    Each row is matched to an existing point by <code>point_label</code>. If a point with that exact label already
+    exists, the measurement is linked to it. If no match is found, a new point is created automatically.
+  </p>
+  <p style="color: #a94442; background: #f2dede; border: 1px solid #ebccd1; padding: 0.5em 0.75em; border-radius: 3px;">
+    <strong>Warning:</strong> label matching is <strong>case-sensitive</strong>. When adding measurements to an
+    existing point, make sure the label is spelled exactly as it appears in the database (e.g.
+    <code>Point01</code> and <code>point01</code> are treated as different points).
+  </p>
+
+  <h4>Required columns</h4>
+  <ul>
+    <li><code>point_label</code> — point identifier (string). Must match an existing point exactly, or a new point will
+      be created.</li>
+    <li><code>east</code> — easting coordinate (float, EPSG:32632)</li>
+    <li><code>north</code> — northing coordinate (float, EPSG:32632)</li>
+    <li><code>h</code> — ellipsoidal height in metres (float)</li>
+  </ul>
+
+  <h4>Survey identification — provide exactly one</h4>
+  <ul>
+    <li><code>survey_id</code> — integer primary key of an existing survey (use this when multiple surveys share the
+      same date)</li>
+    <li><code>survey_date</code> — survey date in <strong>DD/MM/YYYY</strong> format; fails if the date matches more
+      than one survey</li>
+  </ul>
+
+  <h4>Optional columns</h4>
+  <ul>
+    <li><code>meas_date</code> — measurement date (YYYY-MM-DD)</li>
+    <li><code>meas_strategy</code> — strategy string (max 25 chars)</li>
+    <li><code>notes</code> — free text (max 250 chars)</li>
+    <li><code>ds_east</code>, <code>ds_north</code>, <code>ds_h</code> — coordinate standard deviations (float)</li>
+    <li><code>lat</code>, <code>lon</code>, <code>h_orto</code> — normally computed by the DB trigger on save; supply
+      only to override</li>
+  </ul>
+
+  <h4>Example — survey by date</h4>
+  <pre style="background:#fff; padding:0.5em; border:1px solid #ddd;">point_label,survey_date,east,north,h
+Point01,25/07/2023,415946.624,5089448.188,2172.849
+Point02,25/07/2023,415952.969,5089052.831,2173.273</pre>
+
+  <h4>Example — survey by id</h4>
+  <pre style="background:#fff; padding:0.5em; border:1px solid #ddd;">point_label,survey_id,east,north,h
+Point01,42,415946.624,5089448.188,2172.849
+Point02,42,415952.969,5089052.831,2173.273</pre>
+</div>
+{% endblock %}
