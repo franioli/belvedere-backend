@@ -3,6 +3,7 @@ from django.contrib.gis import admin as gis_admin
 from django.contrib.gis.forms.widgets import OSMWidget
 from django.db.models import Count, Max, Min, QuerySet
 from django.http import HttpRequest
+from django.urls import reverse
 from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
@@ -78,13 +79,20 @@ class PointAdmin(admin.ModelAdmin):
         "first_survey_date",
         "last_survey_date",
         "num_measurements",
+        "measurements_link",
         "notes",
         "created_at",
     )
     search_fields = ("id", "label", "notes")
     list_filter = ("active", "is_fixed", "ref_date")
     ordering = ("label", "id")
-    readonly_fields = ("created_at",)
+    readonly_fields = (
+        "created_at",
+        "first_survey_date",
+        "last_survey_date",
+        "num_measurements",
+        "measurements_link",
+    )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Point]:
         return (
@@ -109,6 +117,15 @@ class PointAdmin(admin.ModelAdmin):
     def num_measurements(self, obj: Point):
         return getattr(obj, "_num_measurements", None)
 
+    @admin.display(description="Measurements")
+    def measurements_link(self, obj: Point):
+        url = reverse("admin:surveys_measurement_changelist")
+        return format_html(
+            '<a href="{}?point__id__exact={}">View measurements</a>',
+            url,
+            obj.pk,
+        )
+
 
 class MapWidget(OSMWidget):
     def __init__(self, *args, **kwargs):
@@ -119,6 +136,7 @@ class MapWidget(OSMWidget):
 @admin.register(Measurement)
 class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
     resource_classes = [MeasurementResource]
+    import_template_name = "admin/surveys/import_measurement.html"
     gis_widget = MapWidget
 
     list_display = (
