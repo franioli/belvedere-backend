@@ -17,7 +17,7 @@ from image_index.s3_utils import build_s3_client, get_object_bytes
 INCREMENTAL_BUFFER_DAYS = 7
 
 BATCH_SIZE = 200
-DEFAULT_WORKERS = 8
+DEFAULT_WORKERS = 2  # Keep low to run on vps
 
 
 def _fetch_and_extract(s3, bucket, key, filename):

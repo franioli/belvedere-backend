@@ -14,10 +14,88 @@ PREVIEW_SIZE = (1280, 960)
 THUMBNAIL_SIZE = (160, 120)
 PREVIEW_QUALITY = 80
 THUMBNAIL_QUALITY = 60
-DEFAULT_WORKERS = 4
+DEFAULT_WORKERS = 2  # Keep low to run on vps
 
 PREVIEW_FOLDER = "previews/"
 THUMBNAIL_FOLDER = "thumbnails/"
+
+
+class Command(BaseCommand):
+    help = "Generate preview and thumbnail JPEG files for indexed images and upload them to S3"
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            "--camera-id", type=int, help="Process only one camera by ID"
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Regenerate even if preview_object_key is already set",
+        )
+        parser.add_argument(
+            "--workers",
+            type=int,
+            default=DEFAULT_WORKERS,
+            help=f"Parallel threads (default: {DEFAULT_WORKERS})",
+        )
+        parser.add_argument("--dry-run", action="store_true")
+
+    def handle(self, *args, **options):
+        if not settings.S3_ENDPOINT_URL:
+            raise CommandError("S3_ENDPOINT_URL is not configured")
+
+        s3 = build_s3_client()
+        workers = max(1, options["workers"])
+
+        qs = Image.objects.select_related("camera").order_by("id")
+        if options["camera_id"]:
+            qs = qs.filter(camera_id=options["camera_id"])
+        if not options["force"]:
+            qs = qs.filter(preview_object_key__isnull=True)
+
+        total = qs.count()
+        self.stdout.write(
+            f"Images to process: {total} (force={options['force']}, dry_run={options['dry_run']})"
+        )
+
+        if options["dry_run"] or total == 0:
+            return
+
+        done = 0
+        errors = 0
+
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {
+                pool.submit(_process_image, s3, img): img for img in qs.iterator()
+            }
+
+            for future in as_completed(futures):
+                img = futures[future]
+                preview_key = f"{PREVIEW_FOLDER}{img.object_key}"
+                thumb_key = f"{THUMBNAIL_FOLDER}{img.object_key}"
+
+                try:
+                    preview_bytes, thumb_bytes = future.result()
+                    put_object_bytes(
+                        s3, img.bucket, preview_key, preview_bytes, "image/jpeg"
+                    )
+                    put_object_bytes(
+                        s3, img.bucket, thumb_key, thumb_bytes, "image/jpeg"
+                    )
+                    Image.objects.filter(pk=img.pk).update(
+                        preview_object_key=preview_key,
+                        thumbnail_object_key=thumb_key,
+                    )
+                    done += 1
+                    if done % 50 == 0:
+                        self.stdout.write(f"  {done}/{total} done, {errors} errors")
+                except Exception as exc:
+                    errors += 1
+                    self.stderr.write(f"  ERROR {img.object_key}: {exc}")
+
+        self.stdout.write(
+            self.style.SUCCESS(f"Done: {done} generated, {errors} errors")
+        )
 
 
 def _make_preview(image_bytes: bytes, camera_name: str, dt_str: str) -> bytes:
@@ -106,81 +184,3 @@ def _process_image(s3, image: Image) -> tuple[bytes, bytes]:
     preview = _make_preview(raw, image.camera.camera_name, dt_str)
     thumbnail = _make_thumbnail(raw)
     return preview, thumbnail
-
-
-class Command(BaseCommand):
-    help = "Generate preview and thumbnail JPEG files for indexed images and upload them to S3"
-
-    def add_arguments(self, parser):
-        parser.add_argument(
-            "--camera-id", type=int, help="Process only one camera by ID"
-        )
-        parser.add_argument(
-            "--force",
-            action="store_true",
-            help="Regenerate even if preview_object_key is already set",
-        )
-        parser.add_argument(
-            "--workers",
-            type=int,
-            default=DEFAULT_WORKERS,
-            help=f"Parallel threads (default: {DEFAULT_WORKERS})",
-        )
-        parser.add_argument("--dry-run", action="store_true")
-
-    def handle(self, *args, **options):
-        if not settings.S3_ENDPOINT_URL:
-            raise CommandError("S3_ENDPOINT_URL is not configured")
-
-        s3 = build_s3_client()
-        workers = max(1, options["workers"])
-
-        qs = Image.objects.select_related("camera").order_by("id")
-        if options["camera_id"]:
-            qs = qs.filter(camera_id=options["camera_id"])
-        if not options["force"]:
-            qs = qs.filter(preview_object_key__isnull=True)
-
-        total = qs.count()
-        self.stdout.write(
-            f"Images to process: {total} (force={options['force']}, dry_run={options['dry_run']})"
-        )
-
-        if options["dry_run"] or total == 0:
-            return
-
-        done = 0
-        errors = 0
-
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = {
-                pool.submit(_process_image, s3, img): img for img in qs.iterator()
-            }
-
-            for future in as_completed(futures):
-                img = futures[future]
-                preview_key = f"{PREVIEW_FOLDER}{img.object_key}"
-                thumb_key = f"{THUMBNAIL_FOLDER}{img.object_key}"
-
-                try:
-                    preview_bytes, thumb_bytes = future.result()
-                    put_object_bytes(
-                        s3, img.bucket, preview_key, preview_bytes, "image/jpeg"
-                    )
-                    put_object_bytes(
-                        s3, img.bucket, thumb_key, thumb_bytes, "image/jpeg"
-                    )
-                    Image.objects.filter(pk=img.pk).update(
-                        preview_object_key=preview_key,
-                        thumbnail_object_key=thumb_key,
-                    )
-                    done += 1
-                    if done % 50 == 0:
-                        self.stdout.write(f"  {done}/{total} done, {errors} errors")
-                except Exception as exc:
-                    errors += 1
-                    self.stderr.write(f"  ERROR {img.object_key}: {exc}")
-
-        self.stdout.write(
-            self.style.SUCCESS(f"Done: {done} generated, {errors} errors")
-        )
