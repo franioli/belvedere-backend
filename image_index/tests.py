@@ -1,9 +1,11 @@
+from datetime import timedelta
 from io import BytesIO
-from unittest.mock import ANY, Mock, patch
+from unittest.mock import Mock, patch
 
 from django.core.management import call_command
 from django.test import RequestFactory, TestCase, override_settings
 from django.urls import reverse
+from django.utils.timezone import now as tz_now
 from PIL import Image as PILImage
 from PIL import ImageDraw
 from rest_framework.test import APITestCase
@@ -392,3 +394,131 @@ class PresignedUrlViewTests(TestCase):
         data = response.json()
         self.assertIn(f"/cams/images/{self.image.pk}/thumb/", data["url"])
         mock_sign.assert_not_called()
+
+
+class IndexS3ImagesCommandTests(TestCase):
+    CMD = "index_s3_images"
+    BUCKET = "bkt"
+    PREFIX = "cam1/"
+
+    def setUp(self):
+        self.camera = Camera.objects.create(
+            camera_name="Test Cam",
+            slug="test-cam",
+            s3_bucket=self.BUCKET,
+            s3_prefix=self.PREFIX,
+        )
+
+    def _jpeg_bytes(self) -> bytes:
+        buf = BytesIO()
+        PILImage.new("RGB", (100, 75)).save(buf, format="JPEG")
+        return buf.getvalue()
+
+    def _s3_obj(self, key: str, etag: str, last_modified) -> dict:
+        return {"Key": key, "ETag": f'"{etag}"', "Size": 500, "LastModified": last_modified}
+
+    def _mock_s3(self, pages: list[dict]):
+        mock_s3 = Mock()
+        mock_paginator = Mock()
+        mock_paginator.paginate.return_value = pages
+        mock_s3.get_paginator.return_value = mock_paginator
+        return mock_s3
+
+    def _patches(self, mock_s3):
+        return (
+            patch(
+                "image_index.management.commands.index_s3_images.build_s3_client",
+                return_value=mock_s3,
+            ),
+            patch(
+                "image_index.management.commands.index_s3_images.get_object_bytes",
+                return_value=(self._jpeg_bytes(), "image/jpeg"),
+            ),
+        )
+
+    def test_new_image_is_indexed(self):
+        t = tz_now() - timedelta(hours=1)
+        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p:
+            call_command(self.CMD, camera_id=self.camera.pk)
+        self.assertEqual(Image.objects.filter(camera=self.camera).count(), 1)
+
+    def test_unchanged_etag_is_skipped(self):
+        t = tz_now() - timedelta(hours=1)
+        Image.objects.create(
+            camera=self.camera, bucket=self.BUCKET,
+            object_key="cam1/img.jpg", filename="img.jpg",
+            s3_etag="abc", s3_last_modified=t,
+        )
+        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p as mock_get:
+            call_command(self.CMD, camera_id=self.camera.pk)
+        mock_get.assert_not_called()
+
+    def test_incremental_no_watermark_does_full_scan(self):
+        """With no images in DB, --incremental still indexes everything."""
+        t = tz_now() - timedelta(days=30)
+        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p:
+            call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
+        self.assertEqual(Image.objects.filter(camera=self.camera).count(), 1)
+
+    def test_incremental_skips_objects_before_buffer(self):
+        """Objects older than watermark - buffer_days are skipped without an ETag check."""
+        watermark = tz_now() - timedelta(days=10)
+        Image.objects.create(
+            camera=self.camera, bucket=self.BUCKET,
+            object_key="cam1/watermark.jpg", filename="watermark.jpg",
+            s3_etag="wm", s3_last_modified=watermark,
+        )
+        # 30 days ago: well before buffer_start (watermark - 7 days = 17 days ago)
+        ancient = tz_now() - timedelta(days=30)
+        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/ancient.jpg", "old", ancient)]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p as mock_get:
+            call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
+        # ancient object was skipped: not fetched, not added to DB
+        mock_get.assert_not_called()
+        self.assertFalse(Image.objects.filter(object_key="cam1/ancient.jpg").exists())
+
+    def test_incremental_indexes_new_objects(self):
+        """Objects newer than the watermark are fetched and indexed."""
+        watermark = tz_now() - timedelta(days=2)
+        Image.objects.create(
+            camera=self.camera, bucket=self.BUCKET,
+            object_key="cam1/old.jpg", filename="old.jpg",
+            s3_etag="wm", s3_last_modified=watermark,
+        )
+        fresh = tz_now() - timedelta(hours=1)
+        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/new.jpg", "fresh", fresh)]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p:
+            call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
+        self.assertTrue(Image.objects.filter(object_key="cam1/new.jpg").exists())
+
+    def test_incremental_etag_match_within_buffer_is_skipped(self):
+        """An object within the buffer window but with matching ETag is not re-fetched."""
+        watermark = tz_now() - timedelta(days=1)
+        within_buffer = tz_now() - timedelta(days=5)  # inside 7-day buffer
+        # Watermark image (establishes max s3_last_modified)
+        Image.objects.create(
+            camera=self.camera, bucket=self.BUCKET,
+            object_key="cam1/newest.jpg", filename="newest.jpg",
+            s3_etag="wm", s3_last_modified=watermark,
+        )
+        # Image inside buffer with matching ETag
+        Image.objects.create(
+            camera=self.camera, bucket=self.BUCKET,
+            object_key="cam1/buffer.jpg", filename="buffer.jpg",
+            s3_etag="same", s3_last_modified=within_buffer,
+        )
+        mock_s3 = self._mock_s3([{"Contents": [
+            self._s3_obj("cam1/buffer.jpg", "same", within_buffer),
+        ]}])
+        build_p, get_p = self._patches(mock_s3)
+        with build_p, get_p as mock_get:
+            call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
+        mock_get.assert_not_called()

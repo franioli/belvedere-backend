@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import timedelta
 from pathlib import PurePosixPath
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
+from django.db.models import Max
 
 from image_index.image_metadata import (
     IMAGE_EXTENSIONS,
@@ -11,6 +13,8 @@ from image_index.image_metadata import (
 )
 from image_index.models import Camera, Image
 from image_index.s3_utils import build_s3_client, get_object_bytes
+
+INCREMENTAL_BUFFER_DAYS = 7
 
 BATCH_SIZE = 200
 DEFAULT_WORKERS = 8
@@ -91,19 +95,36 @@ class Command(BaseCommand):
         parser.add_argument(
             "--prefix", type=str, help="Override prefix for selected camera"
         )
-        parser.add_argument("--dry-run", action="store_true")
         parser.add_argument(
-            "--force",
+            "--incremental",
             action="store_true",
-            help="Re-fetch and re-index even unchanged objects (ETag match)",
+            help=(
+                "Skip objects older than the watermark (max s3_last_modified in DB minus --incremental-buffer-days). Faster for routine runs when most objects are already indexed."
+            ),
         )
-        parser.add_argument("--limit", type=int)
+        parser.add_argument(
+            "--incremental-buffer-days",
+            type=int,
+            default=INCREMENTAL_BUFFER_DAYS,
+            help=(
+                "How many days before the watermark to still re-check (default: 7). Covers re-uploads and clock skew."
+            ),
+        )
         parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
         parser.add_argument(
             "--workers",
             type=int,
             default=DEFAULT_WORKERS,
             help="Number of parallel threads for S3 fetch + EXIF extraction (default: 8)",
+        )
+        parser.add_argument("--dry-run", action="store_true")
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Re-fetch and re-index even unchanged objects (ETag match)",
+        )
+        parser.add_argument(
+            "--limit", type=int, help="Limit number of objects to process (for testing)"
         )
 
     def handle(self, *args, **options):
@@ -140,13 +161,32 @@ class Command(BaseCommand):
                 f"bucket={bucket} prefix={prefix or ''} workers={workers}"
             )
 
+            # --- Incremental watermark ---
+            watermark = None
+            buffer_start = None
+            if options["incremental"] and not options["force"]:
+                watermark = Image.objects.filter(
+                    camera=camera, bucket=bucket
+                ).aggregate(Max("s3_last_modified"))["s3_last_modified__max"]
+                if watermark is not None:
+                    buffer_start = watermark - timedelta(
+                        days=options["incremental_buffer_days"]
+                    )
+                    self.stdout.write(
+                        f"  incremental mode: watermark={watermark.isoformat()} "
+                        f"buffer_start={buffer_start.isoformat()}"
+                    )
+                else:
+                    self.stdout.write("  incremental mode: no watermark yet, full scan")
+
             # --- Phase 1: load existing ETags from DB to enable skip logic ---
+            etag_qs = Image.objects.filter(camera=camera, bucket=bucket)
+            if buffer_start is not None:
+                etag_qs = etag_qs.filter(s3_last_modified__gte=buffer_start)
             existing_etags: dict[str, str | None] = dict(
-                Image.objects.filter(camera=camera, bucket=bucket).values_list(
-                    "object_key", "s3_etag"
-                )
+                etag_qs.values_list("object_key", "s3_etag")
             )
-            self.stdout.write(f"  {len(existing_etags)} rows already in DB")
+            self.stdout.write(f"  {len(existing_etags)} rows loaded from DB")
 
             paginator = s3.get_paginator("list_objects_v2")
             page_iter = paginator.paginate(
@@ -185,6 +225,17 @@ class Command(BaseCommand):
                         size = obj.get("Size")
                         last_modified = obj.get("LastModified")
                         filename = PurePosixPath(key).name
+
+                        # Incremental: skip objects older than the buffer window —
+                        # they are guaranteed to be indexed already.
+                        if (
+                            buffer_start is not None
+                            and last_modified is not None
+                            and last_modified < buffer_start
+                        ):
+                            counts["skipped"] += 1
+                            grand_total["skipped"] += 1
+                            continue
 
                         # Skip if ETag matches an existing row (content unchanged)
                         if (
