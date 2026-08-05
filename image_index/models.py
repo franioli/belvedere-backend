@@ -12,7 +12,7 @@ from django.contrib.gis.db import models
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.fields import ArrayField
 
-from georef.constants import ENU_SRID
+from georef.constants import ENU_SRID, PROJECT_SRID
 from image_index.image_metadata import (
     FILENAME_DATETIME_RE,
     parse_datetime_from_exif_dict,
@@ -134,12 +134,12 @@ class Camera(models.Model):
     easting = models.FloatField(
         null=True,
         blank=True,
-        help_text="Camera easting in the project CRS, usually EPSG:32632.",
+        help_text="Camera easting in the project CRS, usually EPSG:7791.",
     )
     northing = models.FloatField(
         null=True,
         blank=True,
-        help_text="Camera northing in the project CRS, usually EPSG:32632.",
+        help_text="Camera northing in the project CRS, usually EPSG:7791.",
     )
     elevation = models.FloatField(
         null=True,
@@ -147,7 +147,7 @@ class Camera(models.Model):
         help_text="Camera elevation in meters in the project CRS.",
     )
     epsg_code = models.IntegerField(
-        default=32632,
+        default=PROJECT_SRID,
         help_text="EPSG code of the coordinate reference system used for location fields.",
     )
     installation_date = models.DateField(
@@ -164,7 +164,7 @@ class Camera(models.Model):
 
     location = gis_models.PointField(
         dim=3,
-        srid=32632,
+        srid=PROJECT_SRID,
         null=True,
         blank=True,
         help_text="3D camera location as a PostGIS point geometry in the project CRS.",

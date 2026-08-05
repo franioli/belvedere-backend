@@ -6,6 +6,8 @@ from django.core.exceptions import ValidationError
 from import_export import fields, resources
 from import_export.widgets import DateWidget
 
+from georef.constants import PROJECT_SRID
+
 from .models import Measurement, Point, Survey
 
 logger = logging.getLogger(__name__)
@@ -136,7 +138,7 @@ class MeasurementResource(resources.ModelResource):
     def before_save_instance(self, instance, row, **kwargs):
         if instance.east is not None and instance.north is not None:
             instance.geom = GEOSPoint(
-                float(instance.east), float(instance.north), srid=32632
+                float(instance.east), float(instance.north), srid=PROJECT_SRID
             )
 
     def after_import(self, dataset, result, **kwargs):
