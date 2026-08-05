@@ -80,14 +80,18 @@ class MeasurementResource(resources.ModelResource):
         if row.get("h") in (None, ""):
             raise ValidationError("Missing required column/value: h")
 
-        point, created = Point.objects.get_or_create(
-            label=point_label,
-            defaults={
-                "active": True,
-                "is_fixed": False,
-                "notes": "Automatically created during measurement CSV import",
-            },
-        )
+        # Case-insensitive: an exact-match lookup created D01BIS alongside the
+        # existing D01bis in the 2026 import, splitting that stake's history in
+        # two and losing its displacement in points_movement_*.
+        point = Point.objects.filter(label__iexact=point_label).first()
+        created = point is None
+        if created:
+            point = Point.objects.create(
+                label=point_label,
+                active=True,
+                is_fixed=False,
+                notes="Automatically created during measurement CSV import",
+            )
 
         if created:
             msg = f"Point automatically created from import: label='{point_label}', id={point.pk}"

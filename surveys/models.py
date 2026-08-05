@@ -1,6 +1,7 @@
 import os
 
 from django.contrib.gis.db import models
+from django.db.models.functions import Lower, Trim
 
 from georef.constants import ENU_SRID, PROJECT_SRID
 from surveys.sql import COLUMN_COMMENTS as DOC
@@ -115,6 +116,14 @@ class Point(models.Model):
     class Meta:
         db_table = "points"
         db_table_comment = TABLE_COMMENTS["points"]
+        constraints = [
+            # The pre-existing unique index on `label` is case-sensitive, which
+            # is how the 2026 import created D01BIS next to D01bis. Matches the
+            # key `merge_duplicate_points` groups by.
+            models.UniqueConstraint(
+                Lower(Trim("label")), name="points_label_unique_ci"
+            ),
+        ]
 
     def __str__(self):
         return f"Point {self.label} (ID {self.id})"

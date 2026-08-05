@@ -59,6 +59,25 @@ website must deploy together. CSV import still accepts `ds_*` headers.
 displacements (30 of its 31 non-null rows were negative, impossible for a sigma).
 2015–2025 are clean.
 
+## Point labels are unique case-insensitively
+
+`points.label` had a unique index, but a **case-sensitive** one, and
+`MeasurementResource` looked points up by exact label. The 2026 CSV import
+therefore created `D01BIS` beside the existing `D01bis` for 12 stakes. That is
+not merely untidy: `points_movement_*` partitions by label, so each orphaned
+2026 measurement got `dt = 0` and no displacement at all.
+
+Fixed in August 2026 — `surveys/0027` adds `UniqueConstraint(Lower(Trim("label")))`,
+and the importer now matches with `label__iexact`. `manage.py merge_duplicate_points`
+(dry-run by default, `--apply` to write) finds groups sharing `lower(trim(label))`,
+keeps the row with the most measurements (tie-break lowest id), re-points the
+others' measurements onto it and deletes them. It refuses if both sides measure
+the same survey.
+
+`D38BIS` was **not** a duplicate — a genuinely new stake replacing `D38` — and was
+only renamed to `D38bis` to match the lowercase-suffix convention. Replacement
+stakes stay separate series in the movement views.
+
 ## Apps
 
 ### `georef` — local reference frames

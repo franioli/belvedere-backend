@@ -1,5 +1,6 @@
 import datetime
 
+from django.db import connection
 from django.test import TestCase
 from django.urls import reverse
 from rest_framework.test import APITestCase
@@ -138,3 +139,146 @@ class SurveysApiTests(APITestCase):
         response = self.client.get(reverse("surveys:point-velocity", args=["NOPE"]))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), [])
+
+
+class MergeDuplicatePointsTests(TestCase):
+    """Case-duplicate labels split a stake's history and cost it its movement."""
+
+    @classmethod
+    def setUpTestData(cls):
+        # The command exists to clean up data that predates
+        # `points_label_unique_ci`, so the fixtures need that earlier state.
+        # Dropping the index here is undone by the test transaction rollback.
+        with connection.cursor() as cursor:
+            cursor.execute("DROP INDEX IF EXISTS points_label_unique_ci")
+
+        cls.survey_a = Survey.objects.create(date=datetime.date(2025, 7, 20), year=2025)
+        cls.survey_b = Survey.objects.create(date=datetime.date(2026, 7, 25), year=2026)
+
+        cls.original = Point.objects.create(
+            label="D01bis",
+            active=True,
+            is_fixed=True,
+            ref_date=datetime.date(2017, 10, 5),
+        )
+        cls.duplicate = Point.objects.create(
+            label="D01BIS",
+            active=True,
+            is_fixed=False,
+            notes="Automatically created during measurement CSV import",
+        )
+        Measurement.objects.create(
+            point=cls.original,
+            survey=cls.survey_a,
+            east=416000.0,
+            north=5090000.0,
+            h=2100.0,
+        )
+        Measurement.objects.create(
+            point=cls.duplicate,
+            survey=cls.survey_b,
+            east=416003.0,
+            north=5090004.0,
+            h=2099.0,
+        )
+        # a genuinely new point with no twin must be left alone
+        cls.untouched = Point.objects.create(
+            label="D38BIS", active=True, is_fixed=False
+        )
+
+    def _run(self, *args):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        out = StringIO()
+        call_command("merge_duplicate_points", *args, stdout=out)
+        return out.getvalue()
+
+    def test_dry_run_reports_without_changing_anything(self):
+        output = self._run()
+        self.assertIn("D01bis", output)
+        self.assertIn("dry run", output)
+        self.assertTrue(Point.objects.filter(pk=self.duplicate.pk).exists())
+        self.assertEqual(Measurement.objects.filter(point=self.original).count(), 1)
+
+    def test_dry_run_flags_differing_attributes(self):
+        # the canonical row is is_fixed=True, the duplicate is False
+        self.assertIn("differs on", self._run())
+
+    def test_apply_repoints_measurements_and_removes_the_duplicate(self):
+        self._run("--apply")
+        self.assertFalse(Point.objects.filter(pk=self.duplicate.pk).exists())
+        self.assertEqual(Measurement.objects.filter(point=self.original).count(), 2)
+        # canonical attributes survive
+        self.original.refresh_from_db()
+        self.assertTrue(self.original.is_fixed)
+        self.assertEqual(self.original.ref_date, datetime.date(2017, 10, 5))
+
+    def test_point_without_a_twin_is_untouched(self):
+        self._run("--apply")
+        self.assertTrue(Point.objects.filter(pk=self.untouched.pk).exists())
+
+    def test_merging_restores_the_displacement(self):
+        """The whole point: before the merge the 2026 row has no predecessor."""
+        before = PointsMovementRaw.objects.get(label="D01BIS")
+        self.assertEqual(before.dt, 0)
+        self.assertAlmostEqual(before.d, 0.0)
+
+        self._run("--apply")
+
+        after = PointsMovementRaw.objects.get(label="D01bis", survey_year=2026)
+        self.assertEqual(after.dt, 370)
+        self.assertAlmostEqual(after.d_e, 3.0, places=6)
+        self.assertAlmostEqual(after.d_n, 4.0, places=6)
+
+    def test_is_idempotent(self):
+        self._run("--apply")
+        self.assertIn("no duplicate labels", self._run("--apply"))
+
+
+class CaseInsensitivePointImportTests(TestCase):
+    """The importer must not create a second point differing only by case."""
+
+    def test_existing_point_is_reused_regardless_of_case(self):
+        from surveys.resources import MeasurementResource
+
+        survey = Survey.objects.create(date=datetime.date(2026, 7, 25), year=2026)
+        existing = Point.objects.create(label="D01bis", active=True, is_fixed=False)
+
+        resource = MeasurementResource()
+        resource.before_import(None)
+        row = {
+            "point_label": "D01BIS",
+            "survey_id": str(survey.pk),
+            "east": "416000",
+            "north": "5090000",
+            "h": "2100",
+        }
+        resource.before_import_row(row)
+
+        self.assertEqual(row["point"], existing.pk)
+        self.assertEqual(Point.objects.count(), 1)
+
+
+class LabelUniquenessTests(TestCase):
+    """The constraint that stops this recurring."""
+
+    def test_case_variant_is_rejected(self):
+        from django.db import IntegrityError, transaction
+
+        Point.objects.create(label="D01bis", active=True, is_fixed=False)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Point.objects.create(label="D01BIS", active=True, is_fixed=False)
+
+    def test_whitespace_variant_is_rejected(self):
+        from django.db import IntegrityError, transaction
+
+        Point.objects.create(label="D02bis", active=True, is_fixed=False)
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Point.objects.create(label=" D02BIS ", active=True, is_fixed=False)
+
+    def test_distinct_labels_are_still_allowed(self):
+        Point.objects.create(label="D38", active=True, is_fixed=False)
+        Point.objects.create(label="D38bis", active=True, is_fixed=False)
+        self.assertEqual(Point.objects.filter(label__startswith="D38").count(), 2)
