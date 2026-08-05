@@ -67,6 +67,93 @@ used to read straight from the views (`surveys/urls.py`, `views.py`,
 The DB views therefore remain only for QGIS; external consumers should use
 the API.
 
+## Local ENU reference frame (August 2026)
+
+Migrations `georef/0001–0003`, `surveys/0020`, `image_index/0009` add the
+glacier-local topocentric ENU frame, SRID 990001. See `architecture.md` for the
+design; the notes that matter for migrations:
+
+- `georef/0001` — `ReferenceFrame`, with `proj_pipeline` as a Postgres
+  **generated column**. It uses `||` and `::text`, not `concat()`: `concat()` is
+  STABLE and Postgres rejects non-immutable expressions in generated columns.
+- `georef/0002` — `georef_to_enu` / `georef_from_enu` and the freeze trigger.
+- `georef/0003` — data migration: inserts the frame row (lat_0/lon_0 *derived*
+  with PostGIS from the frozen UTM origin, not transcribed) and the
+  `spatial_ref_sys` row. That is **DML on a PostGIS-owned table**, not DDL — the
+  rule against touching PostGIS relations still holds.
+- `surveys/0020`, `image_index/0009` — the materialised `geom_enu` /
+  `location_enu` columns, their triggers, and the backfills. Both depend on
+  `georef/0003`.
+- `georef/0004` — sets `z_off = 1000` (was 0, which left every point below D12
+  with a negative U). Rewrites the `spatial_ref_sys` srtext, whose REMARK embeds
+  the pipeline, and recomputes both materialised columns. E/N are unaffected:
+  moving the origin along the ellipsoid normal is a pure U translation.
+
+`georef/sql.py` holds the statements that *derive* state from the frame — the
+`spatial_ref_sys` upsert and the two recompute statements — because 0004 and
+`recompute_enu` both regenerate them and they must not drift. The already-applied
+0003/0020/0009 keep their own copies as a record of what ran; on a fresh database
+0004 sets the final state anyway.
+
+**Rule going forward:** a frozen frame is never updated. Corrections mean a new
+row with a new SRID and a new geometry column.
+
+### Rolling back
+
+Nothing here overwrites existing data — `east`/`north`/`h`, `geom`, `location`
+and every legacy table are untouched. The change is purely additive, so the
+migration reverse is the first resort and the dump is only for disasters.
+
+**1. Reverse the migrations** (preferred — no data loss):
+
+```bash
+uv run python manage.py migrate georef zero
+```
+
+One command is enough: Django pulls in the dependants automatically and
+unapplies in the right order — `georef.0004` → `surveys.0020` →
+`image_index.0009` → `georef.0003` → `0002` → `0001`. It drops the
+`geom_enu`/`location_enu`
+columns and their triggers, restores `image_index_camera_sync_location()` to
+its 0007 body, deletes the frame row and the `spatial_ref_sys` 990001 row, and
+drops the `georef_*` functions and table. A frozen frame does not block this:
+the 0003 reverse clears `frozen` before deleting.
+
+Re-applying is just `manage.py migrate` again — the backfills are idempotent.
+
+To undo only the height offset, keeping the frame and its columns:
+
+```bash
+uv run python manage.py migrate georef 0003_belvedere_frame
+```
+
+That restores `z_off = 0`, refreshes `spatial_ref_sys`, and recomputes both
+materialised columns. It refuses if the frame is already frozen.
+
+**2. Restore from the dump** (only if the schema is actually damaged):
+
+```bash
+pg_restore -h $DB_HOST -p $DB_PORT -U $DB_USER -d belvedere \
+    --clean --if-exists --no-owner --no-privileges \
+    db-backups/belvedere_20260805_090017.dump
+```
+
+Caveats: this **discards everything written since the dump was taken**; every
+QGIS client must disconnect first (`--clean` needs to drop objects); and
+`spatial_ref_sys` is owned by `postgres`, so expect permission warnings on
+that table when restoring as `belvedere` — they are harmless, PostGIS
+re-creates it. Restoring into a fresh database and renaming is the safer
+variant when the live DB is still serving.
+
+**Verifying either path:**
+
+```sql
+SELECT count(*) FROM measurements WHERE geom_enu IS NULL;  -- 0 after apply
+SELECT to_regclass('georef_reference_frame');              -- NULL after reverse
+```
+plus `manage.py validate_reference_frame` (read-only) and
+`manage.py showmigrations georef surveys image_index`.
+
 ## Intentionally outside Django
 
 - `scatter_points`, `scatter_measurements` — legacy tables kept for reference

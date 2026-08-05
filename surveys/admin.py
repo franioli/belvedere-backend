@@ -7,6 +7,8 @@ from django.urls import reverse
 from django.utils.html import format_html
 from import_export.admin import ImportExportMixin
 
+from georef.enu import format_enu_point
+
 from .models import (
     ActivePoint,
     Flight,
@@ -161,7 +163,11 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
     list_filter = ("survey", "meas_date", "meas_strategy")
     raw_id_fields = ("point", "survey")
     ordering = ("-meas_date", "-id")
-    readonly_fields = ("created_at",)
+    readonly_fields = ("created_at", "enu_coordinates")
+
+    @admin.display(description="SRID 990001")
+    def enu_coordinates(self, obj) -> str:
+        return format_enu_point(obj.geom_enu)
 
     fieldsets = (
         (
@@ -188,8 +194,13 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
         ),
         (
             "Map",
+            {"fields": ("geom",)},
+        ),
+        (
+            "Local ENU coordinates",
             {
-                "fields": ("geom",),
+                "fields": ("enu_coordinates",),
+                "description": "The ENU position is derived from east/north/h by a database trigger; edit the source coordinates to change it.",
             },
         ),
     )

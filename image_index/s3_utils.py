@@ -30,8 +30,12 @@ def build_readonly_s3_client() -> BaseClient:
 
     Falls back to the read-write credentials if read-only keys are not configured.
     """
-    access_key = getattr(settings, "S3_READONLY_ACCESS_KEY", "") or settings.S3_ACCESS_KEY
-    secret_key = getattr(settings, "S3_READONLY_SECRET_KEY", "") or settings.S3_SECRET_KEY
+    access_key = (
+        getattr(settings, "S3_READONLY_ACCESS_KEY", "") or settings.S3_ACCESS_KEY
+    )
+    secret_key = (
+        getattr(settings, "S3_READONLY_SECRET_KEY", "") or settings.S3_SECRET_KEY
+    )
     return _make_s3_client(access_key, secret_key)
 
 

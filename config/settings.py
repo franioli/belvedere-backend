@@ -24,7 +24,9 @@ S3_SECRET_KEY = config("S3_SECRET_KEY", default="")
 S3_READONLY_ACCESS_KEY = config("S3_READONLY_ACCESS_KEY", default="")
 S3_READONLY_SECRET_KEY = config("S3_READONLY_SECRET_KEY", default="")
 S3_BUCKET_NAME = config("S3_BUCKET_NAME", default="belvedere-images")
-S3_PRODUCTS_BUCKET_NAME = config("S3_PRODUCTS_BUCKET_NAME", default="belvedere-products")
+S3_PRODUCTS_BUCKET_NAME = config(
+    "S3_PRODUCTS_BUCKET_NAME", default="belvedere-products"
+)
 S3_REGION_NAME = config("S3_REGION_NAME", default="nbg1")
 
 # Optional path to a PNG logo file composited onto generated previews (bottom-right corner).
@@ -46,6 +48,7 @@ INSTALLED_APPS = [
     "rest_framework",
     "surveys",
     "image_index",
+    "georef",
 ]
 
 MIDDLEWARE = [

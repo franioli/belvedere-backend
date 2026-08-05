@@ -4,18 +4,20 @@ from django.db import migrations
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0015_remove_product2d_unique_product2d_bucket_object_key_and_more'),
+        (
+            "surveys",
+            "0015_remove_product2d_unique_product2d_bucket_object_key_and_more",
+        ),
     ]
 
     operations = [
         migrations.RemoveField(
-            model_name='product3d',
-            name='proj4',
+            model_name="product3d",
+            name="proj4",
         ),
         migrations.RemoveField(
-            model_name='product3d',
-            name='texture',
+            model_name="product3d",
+            name="texture",
         ),
     ]

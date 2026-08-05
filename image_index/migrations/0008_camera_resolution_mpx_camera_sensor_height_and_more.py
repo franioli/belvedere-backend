@@ -4,25 +4,30 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('image_index', '0007_camera_sync_location_trigger'),
+        ("image_index", "0007_camera_sync_location_trigger"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='camera',
-            name='resolution_Mpx',
-            field=models.FloatField(blank=True, help_text='Sensor resolution in megapixels', null=True),
+            model_name="camera",
+            name="resolution_Mpx",
+            field=models.FloatField(
+                blank=True, help_text="Sensor resolution in megapixels", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='camera',
-            name='sensor_height',
-            field=models.IntegerField(blank=True, help_text='Sensor height in pixels.', null=True),
+            model_name="camera",
+            name="sensor_height",
+            field=models.IntegerField(
+                blank=True, help_text="Sensor height in pixels.", null=True
+            ),
         ),
         migrations.AddField(
-            model_name='camera',
-            name='sensor_width',
-            field=models.IntegerField(blank=True, help_text='Sensor width in pixels.', null=True),
+            model_name="camera",
+            name="sensor_width",
+            field=models.IntegerField(
+                blank=True, help_text="Sensor width in pixels.", null=True
+            ),
         ),
     ]
