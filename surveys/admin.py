@@ -282,6 +282,7 @@ class PointsMeasurementAdmin(ReadOnlyViewAdmin):
         "north",
         "h",
         "h_orto",
+        "is_active",
         "is_fixed",
         "meas_strategy",
     )

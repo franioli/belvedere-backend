@@ -14,11 +14,12 @@ The web-map was updated in the same release.
 
 from django.db import migrations
 
-from surveys.sql import CREATE_VIEWS, DROP_VIEWS, create_views
+from surveys.migrations._legacy_views import create_views as create_legacy_views
+from surveys.sql import CREATE_VIEWS, DROP_VIEWS
 
-#: The same view DDL against the pre-rename column names, so unapplying this
-#: migration rebuilds views that match the reverted table.
-LEGACY_CREATE_VIEWS = create_views("ds")
+#: View DDL against the pre-rename column names, so unapplying this migration
+#: rebuilds views that match the reverted table.
+LEGACY_CREATE_VIEWS = create_legacy_views()
 
 
 class Migration(migrations.Migration):

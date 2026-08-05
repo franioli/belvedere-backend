@@ -368,6 +368,7 @@ class PointsMeasurement(models.Model):
     id = models.IntegerField(primary_key=True)
     label = models.CharField(max_length=45)
     point_id = models.IntegerField()
+    is_active = models.BooleanField(null=True)
     is_fixed = models.BooleanField()
     east = models.FloatField()
     north = models.FloatField()

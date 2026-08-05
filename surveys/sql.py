@@ -22,7 +22,7 @@ COLUMN_COMMENTS: dict[str, str] = {
     # --- measurements ---
     "east": "Easting, m, EPSG:7791 (RDN2008 / UTM 32N).",
     "north": "Northing, m, EPSG:7791 (RDN2008 / UTM 32N).",
-    "h": "Ellipsoidal height, m (GRS80). Not a height above sea level.",
+    "h": "Ellipsoidal height, m (GRS80).",
     "h_orto": "Orthometric height, m. Derived from h via the ITALGEO05 geoid.",
     "lat": "Latitude, decimal degrees, WGS 84. Derived from east/north.",
     "lon": "Longitude, decimal degrees, WGS 84. Derived from east/north.",
@@ -44,6 +44,9 @@ COLUMN_COMMENTS: dict[str, str] = {
     "label": "Point label, e.g. 'D12'.",
     "is_fixed": "True for stable reference marks; false for stakes on moving ice.",
     "active": "Whether the point is still part of the monitoring network.",
+    # `points.active` is exposed as `is_active` by the views, to read alongside
+    # `is_fixed`.
+    "is_active": "Whether the point is still part of the monitoring network.",
     "ref_date": "Date the point was established.",
     # --- surveys ---
     "date": "Campaign date.",
@@ -110,19 +113,14 @@ def _quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-#: Prefix of the standard-deviation columns. They were `ds_*` until
-#: `surveys/0024`, so the view DDL is parameterised: migrations that predate the
-#: rename pass the old prefix and still build on a fresh database.
-SIGMA_PREFIX = "std"
-
-
-def points_measurements_sql(sigma: str = SIGMA_PREFIX) -> str:
-    return f"""
+def points_measurements_sql() -> str:
+    return """
 CREATE OR REPLACE VIEW public.points_measurements AS
  SELECT meas.id,
     meas.geom,
     pts.label,
     meas.point AS point_id,
+    pts.active AS is_active,
     pts.is_fixed,
     meas.east,
     meas.north,
@@ -136,9 +134,9 @@ CREATE OR REPLACE VIEW public.points_measurements AS
     meas.meas_date,
     meas.meas_time,
     meas.meas_strategy,
-    meas.{sigma}_east,
-    meas.{sigma}_north,
-    meas.{sigma}_h
+    meas.std_east,
+    meas.std_north,
+    meas.std_h
    FROM measurements meas
      JOIN surveys sur ON meas.survey = sur.id
      JOIN points pts ON meas.point = pts.id
@@ -259,12 +257,11 @@ CREATE OR REPLACE VIEW public.active_points AS
 
 
 #: Columns each view exposes, for the comments below.
-def points_measurements_columns(sigma: str = SIGMA_PREFIX) -> tuple[str, ...]:
-    return (
-        "geom", "label", "is_fixed", "east", "north", "h_orto", "lat", "lon", "h",
-        "survey_date", "survey_year", "meas_date", "meas_time", "meas_strategy",
-        f"{sigma}_east", f"{sigma}_north", f"{sigma}_h",
-    )  # fmt: skip
+POINTS_MEASUREMENTS_COLUMNS = (
+    "geom", "label", "is_active", "is_fixed", "east", "north", "h_orto", "lat",
+    "lon", "h", "survey_date", "survey_year", "meas_date", "meas_time",
+    "meas_strategy", "std_east", "std_north", "std_h",
+)  # fmt: skip
 
 
 POINTS_MOVEMENT_COLUMNS = (
@@ -279,18 +276,19 @@ ACTIVE_POINTS_COLUMNS = (
 )  # fmt: skip
 
 
-def create_views(sigma: str = SIGMA_PREFIX) -> str:
+def create_views() -> str:
     """View DDL plus column comments, in dependency order.
 
     The comments follow each definition rather than living in a separate
     migration, because dropping a view drops its comments — this way a rebuild
     never leaves QGIS without field metadata.
 
-    `sigma` exists for migrations that predate the `ds_*` -> `std_*` rename.
+    This describes the *current* schema. Migrations that predate a column
+    rename carry their own snapshot in `surveys/migrations/_legacy_views.py`.
     """
     return (
-        points_measurements_sql(sigma)
-        + comment_columns("points_measurements", points_measurements_columns(sigma))
+        points_measurements_sql()
+        + comment_columns("points_measurements", POINTS_MEASUREMENTS_COLUMNS)
         + POINTS_MOVEMENT_RAW_SQL
         + comment_columns("points_movement_raw", POINTS_MOVEMENT_COLUMNS)
         + POINTS_MOVEMENT_FILTERED_SQL
