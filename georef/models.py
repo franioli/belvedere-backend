@@ -13,7 +13,7 @@ from django.db import models
 from django.db.models.functions import Cast
 
 from georef.constants import (
-    ELLIPSOIDS,
+    ELLIPSOID_CHOICES,
     LOCAL_SRID_MAX,
     LOCAL_SRID_MIN,
     PROJECT_SRID,
@@ -116,7 +116,7 @@ class ReferenceFrame(models.Model):
     ellps = models.CharField(
         max_length=16,
         default="GRS80",
-        choices=[(key, key) for key in ELLIPSOIDS],
+        choices=[(name, name) for name in ELLIPSOID_CHOICES],
         help_text="Reference ellipsoid name as understood by PROJ.",
     )
 
@@ -171,11 +171,6 @@ class ReferenceFrame(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} (SRID {self.srid})"
-
-    @property
-    def ellipsoid(self) -> tuple[float, float]:
-        """Semi-major axis and inverse flattening of the frame's ellipsoid."""
-        return ELLIPSOIDS[self.ellps]
 
     def save(self, *args, **kwargs) -> None:
         """Refuse in-place edits of a frozen frame's geometry parameters.

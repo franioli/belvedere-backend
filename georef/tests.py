@@ -7,7 +7,9 @@ from django.test import TestCase
 
 from georef import validation
 from georef.constants import BELVEDERE_FRAME_NAME, ENU_SRID, PROJECT_SRID
-from georef.enu import ecef_to_geodetic, enu_forward, enu_inverse, geodetic_to_ecef
+from georef.crs import crs_definition
+from georef.enu import from_enu, to_enu
+from georef.examples import enu_transform
 from georef.models import ReferenceFrame
 from image_index.models import Camera
 from surveys.models import Measurement, Point, Survey
@@ -130,102 +132,109 @@ class FreezeGuardTests(TestCase):
         )
 
 
-class ClosedFormTests(TestCase):
-    """The pure-Python implementation, on its own."""
+class PyprojTests(TestCase):
+    """The Python-side view of the frame, driven by pyproj."""
 
     def setUp(self) -> None:
         self.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
 
-    def test_orthonormality(self) -> None:
-        result = validation.check_orthonormality(self.frame)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_ecef_round_trip(self) -> None:
-        lat, lon, h = 45.96, 7.91, 2100.0
-        back = ecef_to_geodetic(*geodetic_to_ecef(lat, lon, h))
-        self.assertAlmostEqual(back[0], lat, places=11)
-        self.assertAlmostEqual(back[1], lon, places=11)
-        self.assertAlmostEqual(back[2], h, places=6)
-
-    def test_enu_round_trip(self) -> None:
-        kwargs = {
-            "lat_0": self.frame.lat_0,
-            "lon_0": self.frame.lon_0,
-            "h_0": self.frame.h_0,
-            "x_off": self.frame.x_off,
-            "y_off": self.frame.y_off,
-            "z_off": self.frame.z_off,
-        }
-        lat, lon, h = 45.97, 7.92, 1950.0
-        back = enu_inverse(*enu_forward(lat, lon, h, **kwargs), **kwargs)
-        self.assertAlmostEqual(back[0], lat, places=11)
-        self.assertAlmostEqual(back[1], lon, places=11)
-        self.assertAlmostEqual(back[2], h, places=6)
-
     def test_origin_maps_to_false_origin(self) -> None:
-        e, n, u = enu_forward(
-            self.frame.lat_0,
-            self.frame.lon_0,
-            self.frame.h_0,
-            lat_0=self.frame.lat_0,
-            lon_0=self.frame.lon_0,
-            h_0=self.frame.h_0,
-            x_off=self.frame.x_off,
-            y_off=self.frame.y_off,
-            z_off=self.frame.z_off,
-        )
-        self.assertAlmostEqual(e, self.frame.x_off, places=9)
-        self.assertAlmostEqual(n, self.frame.y_off, places=9)
-        self.assertAlmostEqual(u, self.frame.z_off, places=9)
+        e, n, u = to_enu(self.frame, self.frame.lon_0, self.frame.lat_0, self.frame.h_0)
+        self.assertAlmostEqual(e, self.frame.x_off, places=6)
+        self.assertAlmostEqual(n, self.frame.y_off, places=6)
+        self.assertAlmostEqual(u, self.frame.z_off, places=6)
+
+    def test_round_trip(self) -> None:
+        lon, lat, h = 7.92, 45.97, 1950.0
+        back = from_enu(self.frame, *to_enu(self.frame, lon, lat, h))
+        self.assertAlmostEqual(back[0], lon, places=11)
+        self.assertAlmostEqual(back[1], lat, places=11)
+        self.assertAlmostEqual(back[2], h, places=6)
+
+
+class CrsDefinitionTests(TestCase):
+    """The CRS text handed to QGIS, including its embedded caveat."""
+
+    def setUp(self) -> None:
+        self.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+
+    def test_proj4_keeps_full_precision(self) -> None:
+        proj4text, _ = crs_definition(self.frame)
+        self.assertIn("+proj=ortho", proj4text)
+        # pyproj's own to_proj4() would round these; ours must not
+        self.assertIn(f"+lat_0={self.frame.lat_0}", proj4text)
+        self.assertIn(f"+x_0={self.frame.x_off}", proj4text)
+
+    def test_remark_survives_into_wkt(self) -> None:
+        """The caveat has to travel with the CRS, not just live in the docs."""
+        _, srtext = crs_definition(self.frame)
+        self.assertIn("REMARK[", srtext)
+        self.assertIn("NOT interchangeable", srtext)
+        self.assertIn("georef_from_enu()", srtext)
+        self.assertIn(self.frame.proj_pipeline, srtext)
+        self.assertIn(self.frame.name, srtext)
+
+
+class ExampleScriptTests(TestCase):
+    """`georef/examples/enu_transform.py` hardcodes the frame, so it can rot."""
+
+    def test_pipeline_matches_the_database(self) -> None:
+        frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+        self.assertEqual(enu_transform.PIPELINE, frame.proj_pipeline)
+
+    def test_documented_values_still_hold(self) -> None:
+        self.assertEqual(enu_transform.self_test(), 0)
+
+    def test_agrees_with_the_database(self) -> None:
+        source = (SAMPLE_EAST, SAMPLE_NORTH, SAMPLE_H)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT ST_X(p), ST_Y(p), ST_Z(p) FROM ("
+                "  SELECT georef_to_enu("
+                "      ST_SetSRID(ST_MakePoint(%s, %s, %s), %s), %s) AS p"
+                ") t",
+                [*source, PROJECT_SRID, ENU_SRID],
+            )
+            expected = cursor.fetchone()
+
+        for axis, got, want in zip(
+            "ENU", enu_transform.to_enu(*source), expected, strict=True
+        ):
+            with self.subTest(axis=axis):
+                self.assertAlmostEqual(got, want, places=6)
 
 
 class FrameValidationTests(TestCase):
     """The suite that gates `freeze_reference_frame`, run against the DB."""
 
+    #: Every check `run_checks` is expected to report. Listed explicitly so a
+    #: check cannot quietly vanish during a refactor.
+    EXPECTED_CHECKS = {
+        "pipeline generated",
+        "origin identity",
+        "origin mark agreement",
+        "axis convention",
+        "round trip",
+        "matches pyproj",
+        "rigid motion (scale)",
+        "positivity",
+        "ortho display CRS",
+        "pipeline route equivalence",
+        "materialised up to date",
+        "CRS definition current",
+    }
+
     @classmethod
     def setUpTestData(cls) -> None:
-        cls.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
-        cls.samples = validation.sample_grid()
+        cls.results = validation.run_checks()
 
-    def test_pipeline_generated(self) -> None:
-        result = validation.check_pipeline_generated(self.frame)
-        self.assertTrue(result.passed, result.detail)
+    def test_every_check_passes(self) -> None:
+        for result in self.results:
+            with self.subTest(check=result.name):
+                self.assertTrue(result.passed, result.detail)
 
-    def test_origin_identity(self) -> None:
-        result = validation.check_origin_identity(self.frame)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_origin_mark_agreement(self) -> None:
-        result = validation.check_origin_mark_agreement(self.frame)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_round_trip(self) -> None:
-        result = validation.check_round_trip(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_proj_matches_closed_form(self) -> None:
-        result = validation.check_against_closed_form(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_rigid_motion_no_scale_factor(self) -> None:
-        result = validation.check_rigid_motion(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_positivity(self) -> None:
-        result = validation.check_positivity(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_ortho_display_crs_caveat(self) -> None:
-        result = validation.check_ortho_display_crs(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_pipeline_route_equivalence(self) -> None:
-        result = validation.check_pipeline_route_equivalence(self.frame, self.samples)
-        self.assertTrue(result.passed, result.detail)
-
-    def test_run_checks_all_pass(self) -> None:
-        failed = [result for result in validation.run_checks() if not result.passed]
-        self.assertEqual(failed, [], [result.detail for result in failed])
+    def test_suite_is_complete(self) -> None:
+        self.assertEqual({result.name for result in self.results}, self.EXPECTED_CHECKS)
 
 
 class EnuTriggerTests(TestCase):

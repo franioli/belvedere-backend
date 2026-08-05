@@ -41,6 +41,7 @@ uv run python manage.py collectstatic --noinput  # production
 - **ENU Z is not an altitude.** It is height above the tangent plane at D12 plus a neutral `z_off = 1000`, deliberately chosen so it cannot be misread as a height. Exact heights are `measurements.h` (ellipsoidal) and `h_orto` (orthometric).
 - **Never reproject an ENU layer.** `spatial_ref_sys` defines 990001 as `+proj=ortho` (the only thing QGIS/GDAL can consume), which is *not* interchangeable with the frame: `ST_Transform(geom_enu, ...)` is off by ~0.70 m horizontally (`h·d/N`) and ~0.36 m vertically (`d²/2R`). Keep the QGIS project CRS at 990001, and use `georef_from_enu()` as the inverse.
 - Reuse the shared S3/metadata helpers (`image_index/s3_utils.py`, `image_index/image_metadata.py`) — single source of truth, do not duplicate logic.
+- **Never hand-roll geodesy.** PostGIS/PROJ does it in the database; `pyproj` does it in Python (`georef/enu.py`, `georef/crs.py`). Note the two carry separate PROJ builds — `check_matches_pyproj` proves they agree.
 - External viewers consume the HTTP API (`/surveys/`, `/cams/`); keep API response shapes backward-compatible.
 
 ## Coding standards
