@@ -282,3 +282,60 @@ class LabelUniquenessTests(TestCase):
         Point.objects.create(label="D38", active=True, is_fixed=False)
         Point.objects.create(label="D38bis", active=True, is_fixed=False)
         self.assertEqual(Point.objects.filter(label__startswith="D38").count(), 2)
+
+
+class PointDeletionTests(TestCase):
+    """Deleting a point must not quietly take its measurements with it."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.survey = Survey.objects.create(date=datetime.date(2025, 7, 20), year=2025)
+        cls.with_data = Point.objects.create(
+            label="SMETEO", active=True, is_fixed=False
+        )
+        cls.empty = Point.objects.create(label="EMPTY1", active=True, is_fixed=False)
+        Measurement.objects.create(
+            point=cls.with_data,
+            survey=cls.survey,
+            east=416000.0,
+            north=5090000.0,
+            h=2100.0,
+        )
+
+    def test_point_with_measurements_is_protected(self):
+        from django.db.models import ProtectedError
+
+        with self.assertRaises(ProtectedError):
+            self.with_data.delete()
+        self.assertTrue(Point.objects.filter(pk=self.with_data.pk).exists())
+
+    def test_point_without_measurements_deletes_normally(self):
+        self.empty.delete()
+        self.assertFalse(Point.objects.filter(pk=self.empty.pk).exists())
+
+    def test_survey_with_measurements_is_protected(self):
+        from django.db.models import ProtectedError
+
+        with self.assertRaises(ProtectedError):
+            self.survey.delete()
+
+    def test_admin_action_deletes_point_and_its_measurements(self):
+        from django.contrib.admin.sites import AdminSite
+        from django.test import RequestFactory
+
+        from surveys.admin import PointAdmin
+
+        request = RequestFactory().post("/admin/surveys/point/")
+        request.user = None
+        # message_user needs a message store; the plain request has none
+        setattr(request, "_messages", type("S", (), {"add": lambda *a, **k: None})())
+
+        admin_instance = PointAdmin(Point, AdminSite())
+        admin_instance.delete_with_measurements(
+            request, Point.objects.filter(pk=self.with_data.pk)
+        )
+
+        self.assertFalse(Point.objects.filter(pk=self.with_data.pk).exists())
+        self.assertEqual(
+            Measurement.objects.filter(point_id=self.with_data.pk).count(), 0
+        )

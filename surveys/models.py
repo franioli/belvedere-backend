@@ -137,8 +137,12 @@ class Measurement(models.Model):
     east = models.FloatField(db_comment=DOC["east"])
     north = models.FloatField(db_comment=DOC["north"])
     h = models.FloatField(verbose_name="h (ellipsoidal)", db_comment=DOC["h"])
-    point = models.ForeignKey(Point, models.DO_NOTHING, db_column="point")
-    survey = models.ForeignKey(Survey, models.DO_NOTHING, db_column="survey")
+    # PROTECT, not DO_NOTHING: measurements are the irreplaceable data, so
+    # deleting their point or survey must fail with a readable message rather
+    # than letting the database raise a bare IntegrityError. To remove a point
+    # together with its measurements, use the admin action on PointAdmin.
+    point = models.ForeignKey(Point, models.PROTECT, db_column="point")
+    survey = models.ForeignKey(Survey, models.PROTECT, db_column="survey")
     meas_date = models.DateField(blank=True, null=True, db_comment=DOC["meas_date"])
     std_east = models.FloatField(
         blank=True, null=True, verbose_name="std east", db_comment=DOC["std_east"]

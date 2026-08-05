@@ -1,6 +1,7 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.gis import admin as gis_admin
 from django.contrib.gis.forms.widgets import OSMWidget
+from django.db import transaction
 from django.db.models import Count, Max, Min, QuerySet
 from django.http import HttpRequest
 from django.urls import reverse
@@ -95,6 +96,33 @@ class PointAdmin(admin.ModelAdmin):
         "num_measurements",
         "measurements_link",
     )
+    actions = ("delete_with_measurements",)
+
+    @admin.action(
+        description="Delete selected points AND all their measurements",
+        permissions=["delete"],
+    )
+    def delete_with_measurements(self, request: HttpRequest, queryset):
+        """Deliberate counterpart to the PROTECT on `Measurement.point`.
+
+        The plain delete refuses while measurements exist, which is what keeps
+        a stray click from destroying survey data. This is the explicit way
+        through, and it reports exactly how much was removed.
+        """
+        measurements = Measurement.objects.filter(point__in=queryset)
+        measurement_count = measurements.count()
+        labels = list(queryset.values_list("label", flat=True))
+
+        with transaction.atomic():
+            measurements.delete()
+            point_count, _ = queryset.delete()
+
+        self.message_user(
+            request,
+            f"Deleted {point_count} point(s) and {measurement_count} measurement(s): "
+            f"{', '.join(labels)}.",
+            messages.WARNING,
+        )
 
     def get_queryset(self, request: HttpRequest) -> QuerySet[Point]:
         return (
