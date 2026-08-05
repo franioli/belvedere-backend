@@ -12,6 +12,7 @@ from django.contrib.gis.db import models
 from django.contrib.gis.db import models as gis_models
 from django.contrib.postgres.fields import ArrayField
 
+from georef.constants import ENU_SRID
 from image_index.image_metadata import (
     FILENAME_DATETIME_RE,
     parse_datetime_from_exif_dict,
@@ -167,6 +168,17 @@ class Camera(models.Model):
         null=True,
         blank=True,
         help_text="3D camera location as a PostGIS point geometry in the project CRS.",
+    )
+    location_enu = gis_models.PointField(
+        dim=3,
+        srid=ENU_SRID,
+        null=True,
+        blank=True,
+        editable=False,
+        help_text=(
+            "Camera location in the local ENU frame, filled by a database "
+            "trigger from `location`. Read-only: edit `location` instead."
+        ),
     )
 
     class Meta:

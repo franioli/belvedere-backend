@@ -25,6 +25,10 @@ uv run python manage.py test                     # all tests
 uv run python manage.py test surveys.tests.TestClass.test_method  # single test
 uv run ruff check . && uv run ruff format .      # lint + format
 uv run python manage.py index_s3_images [--camera-id ID] [--dry-run] [--force] [--workers N]
+uv run python manage.py validate_reference_frame [--srid 990001]   # frame checks (read-only)
+uv run python manage.py freeze_reference_frame  [--srid 990001]    # validate, then lock
+uv run python manage.py recompute_enu [--target measurements|cameras|all] [--dry-run]
+uv run python manage.py dump_reference_frame [--output PATH]       # export params to VCS
 uv run python manage.py collectstatic --noinput  # production
 ```
 
@@ -32,7 +36,10 @@ uv run python manage.py collectstatic --noinput  # production
 
 - **Database is fully Django-managed** (single `public` schema). Every schema change — tables **and Postgres views** — goes through a migration. Never apply manual DDL (pgAdmin/QGIS) to project relations.
 - The live DB is shared with QGIS users; guard data-touching migrations and take a `pg_dump` before destructive DDL.
-- Two apps (`surveys`, `image_index`), one PostgreSQL/PostGIS database. Never split into separate databases.
+- Three apps (`surveys`, `image_index`, `georef`), one PostgreSQL/PostGIS database. Never split into separate databases.
+- **The local ENU frame (SRID 990001) is immutable once `frozen`.** Never `UPDATE` the origin or offsets of a frozen `georef_reference_frame` row — every coordinate ever stored in that frame would silently change meaning. A correction means a **new SRID**. Enforced by a DB trigger.
+- **ENU Z is not an altitude.** It is height above the tangent plane at D12 plus a neutral `z_off = 1000`, deliberately chosen so it cannot be misread as a height. Exact heights are `measurements.h` (ellipsoidal) and `h_orto` (orthometric).
+- **Never reproject an ENU layer.** `spatial_ref_sys` defines 990001 as `+proj=ortho` (the only thing QGIS/GDAL can consume), which is *not* interchangeable with the frame: `ST_Transform(geom_enu, ...)` is off by ~0.70 m horizontally (`h·d/N`) and ~0.36 m vertically (`d²/2R`). Keep the QGIS project CRS at 990001, and use `georef_from_enu()` as the inverse.
 - Reuse the shared S3/metadata helpers (`image_index/s3_utils.py`, `image_index/image_metadata.py`) — single source of truth, do not duplicate logic.
 - External viewers consume the HTTP API (`/surveys/`, `/cams/`); keep API response shapes backward-compatible.
 

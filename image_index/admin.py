@@ -9,6 +9,8 @@ from django.db.models import Count, Max, Min
 from django.urls import reverse
 from django.utils.html import format_html
 
+from georef.enu import format_enu_point
+
 from .models import Camera, CameraCalibration, Image
 
 # ========== Cameras and Calibrations ==========
@@ -49,8 +51,12 @@ class CameraAdmin(gis_admin.GISModelAdmin):
         "installation_date",
         "created_at",
     )
-    readonly_fields = ("id", "created_at")
+    readonly_fields = ("id", "created_at", "enu_coordinates")
     ordering = ("camera_name",)
+
+    @admin.display(description="Local ENU (SRID 990001)")
+    def enu_coordinates(self, obj) -> str:
+        return format_enu_point(obj.location_enu)
 
     def save_model(self, request, obj, form, change):
         # OSMWidget always produces 2D points; the location column requires 3D.
@@ -160,8 +166,7 @@ class YearFilterBase(BaseDateFilter):
 
     def lookups(self, request, model_admin):
         years = (
-            model_admin.model.objects
-            .exclude(**{f"{self.date_field}__isnull": True})
+            model_admin.model.objects.exclude(**{f"{self.date_field}__isnull": True})
             .dates(self.date_field, "year")
             .values_list(f"{self.date_field}__year", flat=True)
         )

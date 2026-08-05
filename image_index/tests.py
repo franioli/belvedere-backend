@@ -415,7 +415,12 @@ class IndexS3ImagesCommandTests(TestCase):
         return buf.getvalue()
 
     def _s3_obj(self, key: str, etag: str, last_modified) -> dict:
-        return {"Key": key, "ETag": f'"{etag}"', "Size": 500, "LastModified": last_modified}
+        return {
+            "Key": key,
+            "ETag": f'"{etag}"',
+            "Size": 500,
+            "LastModified": last_modified,
+        }
 
     def _mock_s3(self, pages: list[dict]):
         mock_s3 = Mock()
@@ -438,7 +443,9 @@ class IndexS3ImagesCommandTests(TestCase):
 
     def test_new_image_is_indexed(self):
         t = tz_now() - timedelta(hours=1)
-        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        mock_s3 = self._mock_s3(
+            [{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p:
             call_command(self.CMD, camera_id=self.camera.pk)
@@ -447,11 +454,16 @@ class IndexS3ImagesCommandTests(TestCase):
     def test_unchanged_etag_is_skipped(self):
         t = tz_now() - timedelta(hours=1)
         Image.objects.create(
-            camera=self.camera, bucket=self.BUCKET,
-            object_key="cam1/img.jpg", filename="img.jpg",
-            s3_etag="abc", s3_last_modified=t,
+            camera=self.camera,
+            bucket=self.BUCKET,
+            object_key="cam1/img.jpg",
+            filename="img.jpg",
+            s3_etag="abc",
+            s3_last_modified=t,
         )
-        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        mock_s3 = self._mock_s3(
+            [{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p as mock_get:
             call_command(self.CMD, camera_id=self.camera.pk)
@@ -460,7 +472,9 @@ class IndexS3ImagesCommandTests(TestCase):
     def test_incremental_no_watermark_does_full_scan(self):
         """With no images in DB, --incremental still indexes everything."""
         t = tz_now() - timedelta(days=30)
-        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}])
+        mock_s3 = self._mock_s3(
+            [{"Contents": [self._s3_obj("cam1/img.jpg", "abc", t)]}]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p:
             call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
@@ -470,13 +484,18 @@ class IndexS3ImagesCommandTests(TestCase):
         """Objects older than watermark - buffer_days are skipped without an ETag check."""
         watermark = tz_now() - timedelta(days=10)
         Image.objects.create(
-            camera=self.camera, bucket=self.BUCKET,
-            object_key="cam1/watermark.jpg", filename="watermark.jpg",
-            s3_etag="wm", s3_last_modified=watermark,
+            camera=self.camera,
+            bucket=self.BUCKET,
+            object_key="cam1/watermark.jpg",
+            filename="watermark.jpg",
+            s3_etag="wm",
+            s3_last_modified=watermark,
         )
         # 30 days ago: well before buffer_start (watermark - 7 days = 17 days ago)
         ancient = tz_now() - timedelta(days=30)
-        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/ancient.jpg", "old", ancient)]}])
+        mock_s3 = self._mock_s3(
+            [{"Contents": [self._s3_obj("cam1/ancient.jpg", "old", ancient)]}]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p as mock_get:
             call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
@@ -488,12 +507,17 @@ class IndexS3ImagesCommandTests(TestCase):
         """Objects newer than the watermark are fetched and indexed."""
         watermark = tz_now() - timedelta(days=2)
         Image.objects.create(
-            camera=self.camera, bucket=self.BUCKET,
-            object_key="cam1/old.jpg", filename="old.jpg",
-            s3_etag="wm", s3_last_modified=watermark,
+            camera=self.camera,
+            bucket=self.BUCKET,
+            object_key="cam1/old.jpg",
+            filename="old.jpg",
+            s3_etag="wm",
+            s3_last_modified=watermark,
         )
         fresh = tz_now() - timedelta(hours=1)
-        mock_s3 = self._mock_s3([{"Contents": [self._s3_obj("cam1/new.jpg", "fresh", fresh)]}])
+        mock_s3 = self._mock_s3(
+            [{"Contents": [self._s3_obj("cam1/new.jpg", "fresh", fresh)]}]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p:
             call_command(self.CMD, camera_id=self.camera.pk, incremental=True)
@@ -505,19 +529,31 @@ class IndexS3ImagesCommandTests(TestCase):
         within_buffer = tz_now() - timedelta(days=5)  # inside 7-day buffer
         # Watermark image (establishes max s3_last_modified)
         Image.objects.create(
-            camera=self.camera, bucket=self.BUCKET,
-            object_key="cam1/newest.jpg", filename="newest.jpg",
-            s3_etag="wm", s3_last_modified=watermark,
+            camera=self.camera,
+            bucket=self.BUCKET,
+            object_key="cam1/newest.jpg",
+            filename="newest.jpg",
+            s3_etag="wm",
+            s3_last_modified=watermark,
         )
         # Image inside buffer with matching ETag
         Image.objects.create(
-            camera=self.camera, bucket=self.BUCKET,
-            object_key="cam1/buffer.jpg", filename="buffer.jpg",
-            s3_etag="same", s3_last_modified=within_buffer,
+            camera=self.camera,
+            bucket=self.BUCKET,
+            object_key="cam1/buffer.jpg",
+            filename="buffer.jpg",
+            s3_etag="same",
+            s3_last_modified=within_buffer,
         )
-        mock_s3 = self._mock_s3([{"Contents": [
-            self._s3_obj("cam1/buffer.jpg", "same", within_buffer),
-        ]}])
+        mock_s3 = self._mock_s3(
+            [
+                {
+                    "Contents": [
+                        self._s3_obj("cam1/buffer.jpg", "same", within_buffer),
+                    ]
+                }
+            ]
+        )
         build_p, get_p = self._patches(mock_s3)
         with build_p, get_p as mock_get:
             call_command(self.CMD, camera_id=self.camera.pk, incremental=True)

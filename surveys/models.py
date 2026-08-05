@@ -2,6 +2,8 @@ import os
 
 from django.contrib.gis.db import models
 
+from georef.constants import ENU_SRID
+
 # ================ Survey and Instrument Models ================
 
 
@@ -127,6 +129,17 @@ class Measurement(models.Model):
     lon = models.FloatField(blank=True, null=True)
     h_orto = models.FloatField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, null=True)
+    geom_enu = models.PointField(
+        dim=3,
+        srid=ENU_SRID,
+        blank=True,
+        null=True,
+        editable=False,
+        help_text=(
+            "Position in the local ENU frame, filled by a database trigger "
+            "from east/north/h. Read-only: edit the source coordinates instead."
+        ),
+    )
 
     class Meta:
         db_table = "measurements"

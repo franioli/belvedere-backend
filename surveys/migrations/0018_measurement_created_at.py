@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0017_autofield_legacy_pks'),
+        ("surveys", "0017_autofield_legacy_pks"),
     ]
 
     operations = [
         migrations.AddField(
-            model_name='measurement',
-            name='created_at',
+            model_name="measurement",
+            name="created_at",
             field=models.DateTimeField(auto_now_add=True, null=True),
         ),
     ]

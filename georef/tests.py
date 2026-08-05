@@ -1,0 +1,362 @@
+import datetime
+import math
+
+from django.core.exceptions import ValidationError
+from django.db import ProgrammingError, connection, transaction
+from django.test import TestCase
+
+from georef import validation
+from georef.constants import BELVEDERE_FRAME_NAME, ENU_SRID, PROJECT_SRID
+from georef.enu import ecef_to_geodetic, enu_forward, enu_inverse, geodetic_to_ecef
+from georef.models import ReferenceFrame
+from image_index.models import Camera
+from surveys.models import Measurement, Point, Survey
+
+# A point in the middle of the glacier, EPSG:32632, ellipsoidal height.
+SAMPLE_EAST, SAMPLE_NORTH, SAMPLE_H = 416012.633, 5089977.534, 2054.660
+
+# A move of N grid metres is slightly more than N metres on the ground: the
+# UTM scale factor (~0.99969 here) and 2 km of altitude (1 + h/N) each stretch
+# it, together by ~0.64 mm/m. Removing exactly that is the point of the frame,
+# so the trigger tests only sanity-check the magnitude; exactness is pinned by
+# the round-trip tests and `check_rigid_motion`.
+GROUND_STRETCH_BAND = (1.0, 1.002)
+
+
+def pipeline_value(pipeline: str, key: str) -> float:
+    """Read a `+key=value` parameter out of a PROJ pipeline string."""
+    prefix = f"+{key}="
+    token = next(t for t in pipeline.split() if t.startswith(prefix))
+    return float(token.removeprefix(prefix))
+
+
+class ReferenceFrameTests(TestCase):
+    """The frame row itself: it must exist on a freshly migrated database."""
+
+    def setUp(self) -> None:
+        self.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+
+    def test_frame_created_by_migration(self) -> None:
+        self.assertEqual(self.frame.name, BELVEDERE_FRAME_NAME)
+        self.assertEqual(self.frame.origin_mark, "D12")
+        self.assertEqual(self.frame.base_srid, PROJECT_SRID)
+        self.assertEqual((self.frame.x_off, self.frame.y_off), (10000.0, 10000.0))
+
+    def test_pipeline_is_generated_from_parameters(self) -> None:
+        pipeline = self.frame.proj_pipeline
+        self.assertTrue(pipeline.startswith("+proj=pipeline"))
+        self.assertIn("+proj=topocentric", pipeline)
+
+        # Every parameter must survive into the pipeline at full double
+        # precision. Compared as parsed floats, not substrings: Postgres
+        # renders 10000.0 as "10000" while Python renders it as "10000.0".
+        for key, expected in (
+            ("lat_0", self.frame.lat_0),
+            ("lon_0", self.frame.lon_0),
+            ("h_0", self.frame.h_0),
+            ("xoff", self.frame.x_off),
+            ("yoff", self.frame.y_off),
+            ("zoff", self.frame.z_off),
+        ):
+            with self.subTest(parameter=key):
+                self.assertEqual(pipeline_value(pipeline, key), expected)
+
+    def test_pipeline_follows_parameter_changes(self) -> None:
+        self.frame.h_0 = 2222.0
+        self.frame.save()
+        self.frame.refresh_from_db()
+        self.assertIn("+h_0=2222", self.frame.proj_pipeline)
+
+    def test_spatial_ref_sys_row_registered(self) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT auth_name, proj4text, srtext FROM spatial_ref_sys WHERE srid = %s",
+                [ENU_SRID],
+            )
+            auth_name, proj4text, srtext = cursor.fetchone()
+
+        self.assertEqual(auth_name, "BELVEDERE")
+        # PROJ cannot compose geographic -> topocentric as a CRS, so the
+        # registered definition is the orthographic display equivalent.
+        self.assertIn("+proj=ortho", proj4text)
+        self.assertIn("+x_0=10000", proj4text)
+        self.assertIn("Orthographic", srtext)
+        self.assertIn("georef_from_enu", srtext)
+
+
+class FreezeGuardTests(TestCase):
+    """A frozen frame is immutable — corrections mean a new SRID."""
+
+    def setUp(self) -> None:
+        ReferenceFrame.objects.filter(srid=ENU_SRID).update(frozen=True)
+
+    def tearDown(self) -> None:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE georef_reference_frame SET frozen = false WHERE srid = %s",
+                [ENU_SRID],
+            )
+
+    def test_django_save_rejects_origin_change(self) -> None:
+        frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+        frame.h_0 += 1.0
+        with self.assertRaises(ValidationError):
+            frame.save()
+
+    def test_database_trigger_rejects_origin_change(self) -> None:
+        # plpgsql RAISE EXCEPTION is SQLSTATE P0001, which Django surfaces as
+        # ProgrammingError.
+        with self.assertRaises(ProgrammingError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "UPDATE georef_reference_frame SET lat_0 = lat_0 + 0.001 "
+                    "WHERE srid = %s",
+                    [ENU_SRID],
+                )
+
+    def test_database_trigger_rejects_delete(self) -> None:
+        with self.assertRaises(ProgrammingError), transaction.atomic():
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "DELETE FROM georef_reference_frame WHERE srid = %s", [ENU_SRID]
+                )
+
+    def test_unrelated_fields_still_editable(self) -> None:
+        frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+        frame.notes = "audited 2026"
+        frame.save()
+        self.assertEqual(
+            ReferenceFrame.objects.get(srid=ENU_SRID).notes, "audited 2026"
+        )
+
+
+class ClosedFormTests(TestCase):
+    """The pure-Python implementation, on its own."""
+
+    def setUp(self) -> None:
+        self.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+
+    def test_orthonormality(self) -> None:
+        result = validation.check_orthonormality(self.frame)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_ecef_round_trip(self) -> None:
+        lat, lon, h = 45.96, 7.91, 2100.0
+        back = ecef_to_geodetic(*geodetic_to_ecef(lat, lon, h))
+        self.assertAlmostEqual(back[0], lat, places=11)
+        self.assertAlmostEqual(back[1], lon, places=11)
+        self.assertAlmostEqual(back[2], h, places=6)
+
+    def test_enu_round_trip(self) -> None:
+        kwargs = {
+            "lat_0": self.frame.lat_0,
+            "lon_0": self.frame.lon_0,
+            "h_0": self.frame.h_0,
+            "x_off": self.frame.x_off,
+            "y_off": self.frame.y_off,
+            "z_off": self.frame.z_off,
+        }
+        lat, lon, h = 45.97, 7.92, 1950.0
+        back = enu_inverse(*enu_forward(lat, lon, h, **kwargs), **kwargs)
+        self.assertAlmostEqual(back[0], lat, places=11)
+        self.assertAlmostEqual(back[1], lon, places=11)
+        self.assertAlmostEqual(back[2], h, places=6)
+
+    def test_origin_maps_to_false_origin(self) -> None:
+        e, n, u = enu_forward(
+            self.frame.lat_0,
+            self.frame.lon_0,
+            self.frame.h_0,
+            lat_0=self.frame.lat_0,
+            lon_0=self.frame.lon_0,
+            h_0=self.frame.h_0,
+            x_off=self.frame.x_off,
+            y_off=self.frame.y_off,
+            z_off=self.frame.z_off,
+        )
+        self.assertAlmostEqual(e, self.frame.x_off, places=9)
+        self.assertAlmostEqual(n, self.frame.y_off, places=9)
+        self.assertAlmostEqual(u, self.frame.z_off, places=9)
+
+
+class FrameValidationTests(TestCase):
+    """The suite that gates `freeze_reference_frame`, run against the DB."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.frame = ReferenceFrame.objects.get(srid=ENU_SRID)
+        cls.samples = validation.sample_grid()
+
+    def test_pipeline_generated(self) -> None:
+        result = validation.check_pipeline_generated(self.frame)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_origin_identity(self) -> None:
+        result = validation.check_origin_identity(self.frame)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_origin_mark_agreement(self) -> None:
+        result = validation.check_origin_mark_agreement(self.frame)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_round_trip(self) -> None:
+        result = validation.check_round_trip(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_proj_matches_closed_form(self) -> None:
+        result = validation.check_against_closed_form(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_rigid_motion_no_scale_factor(self) -> None:
+        result = validation.check_rigid_motion(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_positivity(self) -> None:
+        result = validation.check_positivity(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_ortho_display_crs_caveat(self) -> None:
+        result = validation.check_ortho_display_crs(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_pipeline_route_equivalence(self) -> None:
+        result = validation.check_pipeline_route_equivalence(self.frame, self.samples)
+        self.assertTrue(result.passed, result.detail)
+
+    def test_run_checks_all_pass(self) -> None:
+        failed = [result for result in validation.run_checks() if not result.passed]
+        self.assertEqual(failed, [], [result.detail for result in failed])
+
+
+class EnuTriggerTests(TestCase):
+    """The materialised columns must stay in step with their sources."""
+
+    @classmethod
+    def setUpTestData(cls) -> None:
+        cls.survey = Survey.objects.create(date=datetime.date(2026, 7, 1), year=2026)
+        cls.point = Point.objects.create(label="TST1", is_fixed=False, active=True)
+
+    def test_measurement_geom_enu_filled_on_insert(self) -> None:
+        measurement = Measurement.objects.create(
+            point=self.point,
+            survey=self.survey,
+            east=SAMPLE_EAST,
+            north=SAMPLE_NORTH,
+            h=SAMPLE_H,
+        )
+        measurement.refresh_from_db()
+        self.assertIsNotNone(measurement.geom_enu)
+        self.assertEqual(measurement.geom_enu.srid, ENU_SRID)
+        self.assertTrue(9000 < measurement.geom_enu.x < 11000)
+        self.assertTrue(9000 < measurement.geom_enu.y < 12000)
+        self.assertTrue(measurement.geom_enu.hasz)
+        # neutral height offset: U is lifted clear of zero, and is not an altitude
+        self.assertTrue(700 < measurement.geom_enu.z < 1200)
+
+    def test_measurement_geom_enu_follows_east(self) -> None:
+        """Moving the source coordinates must move the ENU geometry.
+
+        The shift is *not* exactly 10 m: `east` is a UTM **grid** coordinate,
+        so 10 grid metres are ~10.006 m of true ground distance here.
+        """
+        measurement = Measurement.objects.create(
+            point=self.point,
+            survey=self.survey,
+            east=SAMPLE_EAST,
+            north=SAMPLE_NORTH,
+            h=SAMPLE_H,
+        )
+        measurement.refresh_from_db()
+        before = measurement.geom_enu
+
+        measurement.east = SAMPLE_EAST + 10.0
+        measurement.save()
+        measurement.refresh_from_db()
+        after = measurement.geom_enu
+
+        moved = math.dist((before.x, before.y, before.z), (after.x, after.y, after.z))
+        low, high = GROUND_STRETCH_BAND
+        self.assertGreater(moved / 10.0, low)
+        self.assertLess(moved / 10.0, high)
+
+    def test_measurement_geom_enu_updated_value_round_trips(self) -> None:
+        measurement = Measurement.objects.create(
+            point=self.point,
+            survey=self.survey,
+            east=SAMPLE_EAST,
+            north=SAMPLE_NORTH,
+            h=SAMPLE_H,
+        )
+        measurement.east = SAMPLE_EAST + 10.0
+        measurement.save()
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT ST_X(p) FROM ("
+                "  SELECT georef_from_enu(geom_enu, %s) AS p"
+                "  FROM measurements WHERE id = %s"
+                ") t",
+                [PROJECT_SRID, measurement.id],
+            )
+            self.assertAlmostEqual(cursor.fetchone()[0], SAMPLE_EAST + 10.0, places=6)
+
+    def test_measurement_geom_enu_round_trips_to_source(self) -> None:
+        measurement = Measurement.objects.create(
+            point=self.point,
+            survey=self.survey,
+            east=SAMPLE_EAST,
+            north=SAMPLE_NORTH,
+            h=SAMPLE_H,
+        )
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT ST_X(p), ST_Y(p), ST_Z(p) FROM ("
+                "  SELECT georef_from_enu(geom_enu, %s) AS p"
+                "  FROM measurements WHERE id = %s"
+                ") t",
+                [PROJECT_SRID, measurement.id],
+            )
+            east, north, h = cursor.fetchone()
+
+        self.assertAlmostEqual(east, SAMPLE_EAST, places=6)
+        self.assertAlmostEqual(north, SAMPLE_NORTH, places=6)
+        self.assertAlmostEqual(h, SAMPLE_H, places=6)
+
+    def test_camera_location_enu_filled_from_location(self) -> None:
+        camera = Camera.objects.create(
+            camera_name="Test cam",
+            slug="test-cam",
+            s3_bucket="belvedere-images",
+            s3_prefix="test/",
+            easting=SAMPLE_EAST,
+            northing=SAMPLE_NORTH,
+            elevation=SAMPLE_H,
+        )
+        camera.refresh_from_db()
+        self.assertIsNotNone(camera.location_enu)
+        self.assertEqual(camera.location_enu.srid, ENU_SRID)
+        self.assertTrue(9000 < camera.location_enu.x < 11000)
+        self.assertTrue(700 < camera.location_enu.z < 1200)
+
+    def test_camera_location_enu_follows_location(self) -> None:
+        camera = Camera.objects.create(
+            camera_name="Moving cam",
+            slug="moving-cam",
+            s3_bucket="belvedere-images",
+            s3_prefix="moving/",
+            easting=SAMPLE_EAST,
+            northing=SAMPLE_NORTH,
+            elevation=SAMPLE_H,
+        )
+        camera.refresh_from_db()
+        before = camera.location_enu
+
+        camera.northing = SAMPLE_NORTH + 25.0
+        camera.save()
+        camera.refresh_from_db()
+        after = camera.location_enu
+
+        moved = math.dist((before.x, before.y, before.z), (after.x, after.y, after.z))
+        low, high = GROUND_STRETCH_BAND
+        self.assertGreater(moved / 25.0, low)
+        self.assertLess(moved / 25.0, high)
