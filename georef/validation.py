@@ -3,22 +3,22 @@
 Shared by `georef.tests` and the `validate_reference_frame` /
 `freeze_reference_frame` management commands, so the suite that gates the
 freeze is exactly the suite the tests run.
+
+Sample points come from a `generate_series` grid built in SQL rather than
+shipped as thousands of bind parameters, so each check reads as ordinary SQL.
 """
 
 import math
 from dataclasses import dataclass
 
+import pyproj
 from django.db import connection
 
 from georef.constants import ENU_SRID, GEOGRAPHIC_3D_SRID, PROJECT_SRID
-from georef.enu import (
-    enu_forward,
-    frame_kwargs,
-    gaussian_radius,
-    prime_vertical_radius,
-    rotation_matrix,
-)
+from georef.crs import crs_definition
+from georef.enu import gaussian_radius, geod_for, prime_vertical_radius, to_enu
 from georef.models import ReferenceFrame
+from georef.sql import SPATIAL_REF_SYS_SELECT
 
 #: Bounding box of the survey area in EPSG:32632, padded around the real data
 #: extent (E 415327–416659, N 5087986–5091322, h 1832–2292).
@@ -36,8 +36,6 @@ TOLERANCE_M = 1e-4
 #: judged against survey noise, not against the geodetic tolerance.
 ORIGIN_MARK_TOLERANCE_M = 0.10
 
-Sample = tuple[float, float, float]
-
 
 @dataclass(frozen=True)
 class CheckResult:
@@ -46,24 +44,43 @@ class CheckResult:
     detail: str
 
 
-def sample_grid(steps: int = 12, levels: int = 7) -> list[Sample]:
-    """Deterministic grid of `steps^2 * levels` points spanning the survey area."""
-
-    def axis(lo: float, hi: float, n: int) -> list[float]:
-        return [lo + (hi - lo) * i / (n - 1) for i in range(n)]
-
-    return [
-        (east, north, h)
-        for east in axis(*SAMPLE_BOUNDS["east"], steps)
-        for north in axis(*SAMPLE_BOUNDS["north"], steps)
-        for h in axis(*SAMPLE_BOUNDS["h"], levels)
-    ]
+def proj_versions() -> tuple[str, str]:
+    """PROJ as seen by PostGIS and by pyproj — they need not be the same."""
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT postgis_proj_version()")
+        # postgis_proj_version() appends NETWORK_ENABLED, paths and so on
+        return cursor.fetchone()[0].split()[0], pyproj.proj_version_str
 
 
-def _values_clause(samples: list[Sample]) -> tuple[str, list[float]]:
-    rows = ", ".join(["(%s, %s, %s)"] * len(samples))
-    params: list[float] = [value for sample in samples for value in sample]
-    return rows, params
+def sample_grid_cte(steps: int = 12, levels: int = 7) -> str:
+    """A `steps^2 * levels` grid of source points, as a CTE named `pts`.
+
+    Exposes `src` (a PointZ in the project CRS) and `h`.
+    """
+    (e0, e1), (n0, n1), (h0, h1) = (
+        SAMPLE_BOUNDS["east"],
+        SAMPLE_BOUNDS["north"],
+        SAMPLE_BOUNDS["h"],
+    )
+    return f"""
+    pts AS (
+        SELECT ST_SetSRID(ST_MakePoint(east, north, h), {PROJECT_SRID}) AS src, h
+        FROM (
+            -- Postgres types bare decimal literals as `numeric`; the casts keep
+            -- these floats rather than Decimals on the Python side.
+            SELECT ({e0} + ({e1} - {e0}) * i / {steps - 1}.0)::double precision AS east,
+                   ({n0} + ({n1} - {n0}) * j / {steps - 1}.0)::double precision AS north,
+                   ({h0} + ({h1} - {h0}) * k / {levels - 1}.0)::double precision AS h
+            FROM generate_series(0, {steps - 1}) AS i,
+                 generate_series(0, {steps - 1}) AS j,
+                 generate_series(0, {levels - 1}) AS k
+        ) g
+    )
+    """
+
+
+def _grid_size(steps: int = 12, levels: int = 7) -> int:
+    return steps * steps * levels
 
 
 # --------------------------------------------------------------------------
@@ -156,137 +173,177 @@ def check_origin_mark_agreement(frame: ReferenceFrame) -> CheckResult:
     )
 
 
-def check_round_trip(frame: ReferenceFrame, samples: list[Sample]) -> CheckResult:
+def check_axis_convention(frame: ReferenceFrame) -> CheckResult:
+    """E is east, N is north, U is up — and they are not swapped.
+
+    The invariant checks cannot see this. With `x_off == y_off`, an E/N swap
+    inside PROJ would satisfy round trip, rigid motion, origin identity and
+    positivity alike. So probe explicitly: walk a known geodesic distance from
+    the origin at a known azimuth and assert where it lands.
+
+    A probe `s` metres away on the ellipsoid lands at `s * (1 + h/N)` in the
+    frame, because the point sits `h` above the ellipsoid, and `s^2 / 2R` below
+    the tangent plane.
+    """
+    geod = geod_for(frame)
+    distance = 1000.0
+    normal_radius = prime_vertical_radius(frame.lat_0, frame.ellps)
+    curvature_radius = gaussian_radius(frame.lat_0, frame.ellps)
+
+    expected_horizontal = distance * (1.0 + frame.h_0 / normal_radius)
+    expected_drop = distance * distance / (2.0 * curvature_radius)
+
+    probes = []
+    for label, azimuth in (("north", 0.0), ("east", 90.0)):
+        lon, lat, _ = geod.fwd(frame.lon_0, frame.lat_0, azimuth, distance)
+        probes.append((label, lon, lat, frame.h_0))
+    probes.append(("up", frame.lon_0, frame.lat_0, frame.h_0 + 100.0))
+
+    failures = []
+    with connection.cursor() as cursor:
+        for label, lon, lat, h in probes:
+            cursor.execute(
+                """
+                SELECT ST_X(p), ST_Y(p), ST_Z(p) FROM (
+                    SELECT georef_to_enu(
+                        ST_SetSRID(ST_MakePoint(%s, %s, %s), %s), %s
+                    ) AS p
+                ) t
+                """,
+                [lon, lat, h, GEOGRAPHIC_3D_SRID, frame.srid],
+            )
+            e, n, u = cursor.fetchone()
+            de, dn, du = e - frame.x_off, n - frame.y_off, u - frame.z_off
+
+            if label == "north":
+                expected = (0.0, expected_horizontal, -expected_drop)
+            elif label == "east":
+                expected = (expected_horizontal, 0.0, -expected_drop)
+            else:
+                expected = (0.0, 0.0, 100.0)
+
+            # cross-axis components must vanish; along-axis must match the model
+            for axis, got, want in zip("ENU", (de, dn, du), expected, strict=True):
+                tolerance = 1e-3 if want == 0.0 else 0.01
+                if abs(got - want) > tolerance:
+                    failures.append(
+                        f"{label} probe {axis}: {got:+.4f} vs {want:+.4f} expected"
+                    )
+
+    return CheckResult(
+        "axis convention",
+        not failures,
+        "; ".join(failures)
+        if failures
+        else f"N/E probes at {distance:.0f} m land at "
+        f"{expected_horizontal:.3f} m, drop {expected_drop * 1000:.1f} mm; up probe exact",
+    )
+
+
+def check_round_trip(frame: ReferenceFrame) -> CheckResult:
     """`from_enu(to_enu(p))` must return the input."""
-    rows, params = _values_clause(samples)
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            SELECT max(ST_3DDistance(src, georef_from_enu(georef_to_enu(src, %s), %s)))
-            FROM (
-                SELECT ST_SetSRID(ST_MakePoint(e, n, h), %s) AS src
-                FROM (VALUES {rows}) AS v(e, n, h)
-            ) t
+            WITH {sample_grid_cte()}
+            SELECT max(ST_3DDistance(
+                src, georef_from_enu(georef_to_enu(src, %s), %s)
+            )) FROM pts
             """,
-            [frame.srid, PROJECT_SRID, PROJECT_SRID, *params],
+            [frame.srid, PROJECT_SRID],
         )
         worst = cursor.fetchone()[0]
 
     return CheckResult(
         "round trip",
         worst is not None and worst < TOLERANCE_M,
-        f"worst of {len(samples)} points: {worst * 1000:.6f} mm",
+        f"worst of {_grid_size()} points: {worst * 1000:.6f} mm",
     )
 
 
-def check_against_closed_form(
-    frame: ReferenceFrame, samples: list[Sample]
-) -> CheckResult:
-    """PROJ's topocentric implementation vs. the independent Python one."""
-    rows, params = _values_clause(samples)
+def check_matches_pyproj(frame: ReferenceFrame) -> CheckResult:
+    """PostGIS and pyproj must agree — they carry separate PROJ builds.
+
+    This is where a version divergence between the database's PROJ and the one
+    bundled in the pyproj wheel would surface.
+    """
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            SELECT ST_X(geo), ST_Y(geo), ST_Z(geo),
-                   ST_X(enu), ST_Y(enu), ST_Z(enu)
+            WITH {sample_grid_cte()}
+            SELECT ST_X(geo), ST_Y(geo), ST_Z(geo), ST_X(enu), ST_Y(enu), ST_Z(enu)
             FROM (
                 SELECT ST_Transform(src, %s) AS geo, georef_to_enu(src, %s) AS enu
-                FROM (
-                    SELECT ST_SetSRID(ST_MakePoint(e, n, h), %s) AS src
-                    FROM (VALUES {rows}) AS v(e, n, h)
-                ) s
+                FROM pts
             ) t
             """,
-            [GEOGRAPHIC_3D_SRID, frame.srid, PROJECT_SRID, *params],
+            [GEOGRAPHIC_3D_SRID, frame.srid],
         )
         worst = 0.0
+        count = 0
         for lon, lat, h, e, n, u in cursor.fetchall():
-            expected = enu_forward(lat, lon, h, **frame_kwargs(frame))
-            worst = max(worst, math.dist((e, n, u), expected))
+            worst = max(worst, math.dist((e, n, u), to_enu(frame, lon, lat, h)))
+            count += 1
 
+    postgis_proj, pyproj_proj = proj_versions()
     return CheckResult(
-        "PROJ vs closed form",
+        "matches pyproj",
         worst < TOLERANCE_M,
-        f"worst of {len(samples)} points: {worst * 1000:.6f} mm",
+        f"worst of {count} points: {worst * 1000:.6f} mm "
+        f"(PostGIS PROJ {postgis_proj}, pyproj PROJ {pyproj_proj})",
     )
 
 
-def check_rigid_motion(frame: ReferenceFrame, samples: list[Sample]) -> CheckResult:
+def check_rigid_motion(frame: ReferenceFrame) -> CheckResult:
     """ENU must preserve 3D distances exactly — it is a rotation plus a shift.
 
     This is the check that catches a leaked UTM scale factor: it would show up
-    as a systematic -0.64 mm/m, i.e. ~1.5 m over the glacier.
+    as a systematic -0.64 mm/m, i.e. ~1.5 m over the glacier. Preserving all
+    pairwise distances also means the transform is orthonormal.
     """
-    subset = samples[:: max(1, len(samples) // 40)]
-    rows, params = _values_clause(subset)
     cart_pipeline = f"+proj=pipeline +step +proj=cart +ellps={frame.ellps}"
-
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            WITH pts AS (
-                SELECT ST_SetSRID(ST_MakePoint(e, n, h), %s) AS src
-                FROM (VALUES {rows}) AS v(e, n, h)
-            ), projected AS (
-                SELECT
-                    row_number() OVER () AS rn,
-                    georef_to_enu(src, %s) AS enu,
-                    ST_TransformPipeline(ST_Transform(src, %s), %s, 0) AS ecef
+            WITH {sample_grid_cte(steps=4, levels=3)}, projected AS (
+                SELECT row_number() OVER () AS rn,
+                       georef_to_enu(src, %s) AS enu,
+                       ST_TransformPipeline(ST_Transform(src, %s), %s, 0) AS ecef
                 FROM pts
             )
-            SELECT max(abs(ST_3DDistance(a.enu, b.enu) - ST_3DDistance(a.ecef, b.ecef)))
+            SELECT count(*), max(abs(
+                ST_3DDistance(a.enu, b.enu) - ST_3DDistance(a.ecef, b.ecef)
+            ))
             FROM projected a JOIN projected b ON a.rn < b.rn
             """,
-            [
-                PROJECT_SRID,
-                *params,
-                frame.srid,
-                GEOGRAPHIC_3D_SRID,
-                cart_pipeline,
-            ],
+            [frame.srid, GEOGRAPHIC_3D_SRID, cart_pipeline],
         )
-        worst = cursor.fetchone()[0]
+        pairs, worst = cursor.fetchone()
 
     return CheckResult(
         "rigid motion (scale)",
         worst is not None and worst < 1e-6,
-        f"worst distance error over {len(subset)} points: {worst:.3e} m",
+        f"worst over {pairs} point pairs: {worst:.3e} m",
     )
 
 
-def check_orthonormality(frame: ReferenceFrame) -> CheckResult:
-    """`R^T R = I` for the ECEF->ENU rotation."""
-    r = rotation_matrix(frame.lat_0, frame.lon_0)
-    worst = 0.0
-    for i in range(3):
-        for j in range(3):
-            dot = sum(r[k][i] * r[k][j] for k in range(3))
-            worst = max(worst, abs(dot - (1.0 if i == j else 0.0)))
-    return CheckResult(
-        "orthonormality", worst < 1e-12, f"max |R^T R - I| = {worst:.3e}"
-    )
-
-
-def check_positivity(frame: ReferenceFrame, samples: list[Sample]) -> CheckResult:
+def check_positivity(frame: ReferenceFrame) -> CheckResult:
     """The false origin must be large enough that no coordinate goes negative.
 
     E and N always: that is what `x_off`/`y_off` are for. U only when the frame
     declares a `z_off` — with `z_off = 0`, U is signed height above the tangent
     plane and negative values below the origin are correct.
     """
-    rows, params = _values_clause(samples)
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
+            WITH {sample_grid_cte()}
             SELECT min(ST_X(p)), max(ST_X(p)),
                    min(ST_Y(p)), max(ST_Y(p)),
                    min(ST_Z(p)), max(ST_Z(p))
-            FROM (
-                SELECT georef_to_enu(ST_SetSRID(ST_MakePoint(e, n, h), %s), %s) AS p
-                FROM (VALUES {rows}) AS v(e, n, h)
-            ) t
+            FROM (SELECT georef_to_enu(src, %s) AS p FROM pts) t
             """,
-            [PROJECT_SRID, frame.srid, *params],
+            [frame.srid],
         )
         min_e, max_e, min_n, max_n, min_u, max_u = cursor.fetchone()
 
@@ -302,9 +359,7 @@ def check_positivity(frame: ReferenceFrame, samples: list[Sample]) -> CheckResul
     )
 
 
-def check_ortho_display_crs(
-    frame: ReferenceFrame, samples: list[Sample]
-) -> CheckResult:
+def check_ortho_display_crs(frame: ReferenceFrame) -> CheckResult:
     """Characterise how the `spatial_ref_sys` ortho CRS differs from the frame.
 
     The ortho definition registered for QGIS is **not** interchangeable with
@@ -322,27 +377,20 @@ def check_ortho_display_crs(
     Both are the reason ENU layers must never be reprojected in QGIS: keep the
     project CRS at the frame's SRID, and use `georef_from_enu()` to invert.
     """
-    subset = samples[:: max(1, len(samples) // 60)]
-    rows, params = _values_clause(subset)
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
+            WITH {sample_grid_cte(steps=5, levels=3)}
             SELECT ST_X(enu), ST_Y(enu), ST_Z(enu),
                    ST_X(ortho), ST_Y(ortho), ST_Z(ortho), h
             FROM (
                 SELECT georef_to_enu(src, %s) AS enu,
                        ST_Transform(src, %s) AS ortho,
                        h
-                FROM (
-                    -- Postgres types bare VALUES literals as numeric; the cast
-                    -- keeps `h` a float on the Python side.
-                    SELECT ST_SetSRID(ST_MakePoint(e, n, h), %s) AS src,
-                           h::double precision AS h
-                    FROM (VALUES {rows}) AS v(e, n, h)
-                ) s
+                FROM pts
             ) t
             """,
-            [frame.srid, frame.srid, PROJECT_SRID, *params],
+            [frame.srid, frame.srid],
         )
         curvature_radius = gaussian_radius(frame.lat_0, frame.ellps)
         normal_radius = prime_vertical_radius(frame.lat_0, frame.ellps)
@@ -381,9 +429,7 @@ def check_ortho_display_crs(
     )
 
 
-def check_pipeline_route_equivalence(
-    frame: ReferenceFrame, samples: list[Sample]
-) -> CheckResult:
+def check_pipeline_route_equivalence(frame: ReferenceFrame) -> CheckResult:
     """Geographic-first pipeline vs. one that inverts UTM itself.
 
     Guards the decision to keep the frame independent of UTM: the `to_enu`
@@ -394,8 +440,6 @@ def check_pipeline_route_equivalence(
     defined on. Using the frame's GRS80 here instead measures the GRS80/WGS84
     ellipsoid difference (~0.12 mm) rather than the thing under test.
     """
-    subset = samples[:: max(1, len(samples) // 60)]
-    rows, params = _values_clause(subset)
     utm_pipeline = frame.proj_pipeline.replace(
         "+proj=pipeline",
         "+proj=pipeline +step +inv +proj=utm +zone=32 +ellps=WGS84",
@@ -404,39 +448,121 @@ def check_pipeline_route_equivalence(
     with connection.cursor() as cursor:
         cursor.execute(
             f"""
-            SELECT max(ST_3DDistance(
+            WITH {sample_grid_cte(steps=5, levels=3)}
+            SELECT count(*), max(ST_3DDistance(
                 georef_to_enu(src, %s),
                 ST_TransformPipeline(src, %s, %s)
-            ))
-            FROM (
-                SELECT ST_SetSRID(ST_MakePoint(e, n, h), %s) AS src
-                FROM (VALUES {rows}) AS v(e, n, h)
-            ) t
+            )) FROM pts
             """,
-            [frame.srid, utm_pipeline, frame.srid, PROJECT_SRID, *params],
+            [frame.srid, utm_pipeline, frame.srid],
         )
-        worst = cursor.fetchone()[0]
+        count, worst = cursor.fetchone()
 
     return CheckResult(
         "pipeline route equivalence",
         worst is not None and worst < TOLERANCE_M,
-        f"worst of {len(subset)} points: {worst * 1000:.6f} mm",
+        f"worst of {count} points: {worst * 1000:.6f} mm",
+    )
+
+
+def check_materialised_up_to_date(frame: ReferenceFrame) -> CheckResult:
+    """Stored ENU geometries must match what the frame produces now.
+
+    Nothing else notices when they diverge: every other check derives
+    coordinates fresh. Editing the frame in the admin regenerates
+    `proj_pipeline` (a generated column) but leaves stored geometries stale,
+    and so does a `recompute_enu` that half-finished.
+    """
+    statements = (
+        (
+            "measurements",
+            """
+            SELECT count(*) FILTER (WHERE geom_enu IS NULL),
+                   count(*) FILTER (WHERE geom_enu IS NOT NULL),
+                   coalesce(max(ST_3DDistance(geom_enu, georef_to_enu(
+                       ST_SetSRID(ST_MakePoint(east, north, h), %s), %s))), 0)
+            FROM measurements
+            WHERE east IS NOT NULL AND north IS NOT NULL AND h IS NOT NULL
+            """,
+            True,
+        ),
+        (
+            "cameras",
+            """
+            SELECT count(*) FILTER (WHERE location_enu IS NULL),
+                   count(*) FILTER (WHERE location_enu IS NOT NULL),
+                   coalesce(max(ST_3DDistance(
+                       location_enu, georef_to_enu(location, %s))), 0)
+            FROM image_index_camera
+            WHERE location IS NOT NULL
+            """,
+            False,
+        ),
+    )
+
+    parts = []
+    worst = 0.0
+    missing_total = 0
+    with connection.cursor() as cursor:
+        for label, sql, needs_project_srid in statements:
+            params = [PROJECT_SRID, frame.srid] if needs_project_srid else [frame.srid]
+            cursor.execute(sql, params)
+            missing, present, drift = cursor.fetchone()
+            worst = max(worst, drift)
+            missing_total += missing
+            parts.append(f"{present} {label} (missing {missing})")
+
+    return CheckResult(
+        "materialised up to date",
+        worst < TOLERANCE_M and missing_total == 0,
+        f"{', '.join(parts)}, worst drift {worst * 1000:.6f} mm",
+    )
+
+
+def check_crs_definition_current(frame: ReferenceFrame) -> CheckResult:
+    """`spatial_ref_sys` must match what `georef.crs` generates today."""
+    with connection.cursor() as cursor:
+        cursor.execute(SPATIAL_REF_SYS_SELECT, [frame.srid])
+        row = cursor.fetchone()
+
+    if row is None:
+        return CheckResult(
+            "CRS definition current", False, f"no spatial_ref_sys row for {frame.srid}"
+        )
+
+    expected_proj4, expected_srtext = crs_definition(frame)
+    stale = [
+        name
+        for name, stored, expected in (
+            ("proj4text", row[0], expected_proj4),
+            ("srtext", row[1], expected_srtext),
+        )
+        if stored != expected
+    ]
+
+    return CheckResult(
+        "CRS definition current",
+        not stale,
+        f"{', '.join(stale)} stale — re-run the CRS migration"
+        if stale
+        else "proj4text and srtext match the generator",
     )
 
 
 def run_checks(srid: int = ENU_SRID) -> list[CheckResult]:
     """Run every frame check. Order is stable so output can be diffed."""
     frame = ReferenceFrame.objects.get(srid=srid)
-    samples = sample_grid()
     return [
         check_pipeline_generated(frame),
         check_origin_identity(frame),
         check_origin_mark_agreement(frame),
-        check_round_trip(frame, samples),
-        check_against_closed_form(frame, samples),
-        check_rigid_motion(frame, samples),
-        check_orthonormality(frame),
-        check_positivity(frame, samples),
-        check_ortho_display_crs(frame, samples),
-        check_pipeline_route_equivalence(frame, samples),
+        check_axis_convention(frame),
+        check_round_trip(frame),
+        check_matches_pyproj(frame),
+        check_rigid_motion(frame),
+        check_positivity(frame),
+        check_ortho_display_crs(frame),
+        check_pipeline_route_equivalence(frame),
+        check_materialised_up_to_date(frame),
+        check_crs_definition_current(frame),
     ]

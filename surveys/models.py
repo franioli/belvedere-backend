@@ -115,7 +115,7 @@ class Measurement(models.Model):
     geom = models.PointField(srid=32632, blank=True, null=True)
     east = models.FloatField()
     north = models.FloatField()
-    h = models.FloatField()
+    h = models.FloatField(verbose_name="h (ellipsoidal)")
     point = models.ForeignKey(Point, models.DO_NOTHING, db_column="point")
     survey = models.ForeignKey(Survey, models.DO_NOTHING, db_column="survey")
     meas_date = models.DateField(blank=True, null=True)
@@ -314,7 +314,7 @@ class PointsMeasurement(models.Model):
     is_fixed = models.BooleanField()
     east = models.FloatField()
     north = models.FloatField()
-    h = models.FloatField()
+    h = models.FloatField(verbose_name="h (ellipsoidal)")
     h_orto = models.FloatField(null=True)
     lat = models.FloatField(null=True)
     lon = models.FloatField(null=True)
@@ -386,7 +386,7 @@ class ActivePoint(models.Model):
     last_measure_date = models.DateField(null=True)
     east = models.FloatField()
     north = models.FloatField()
-    h = models.FloatField()
+    h = models.FloatField(verbose_name="h (ellipsoidal)")
     is_fixed = models.BooleanField()
 
     class Meta:

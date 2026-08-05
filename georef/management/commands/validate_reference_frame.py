@@ -4,7 +4,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from georef.constants import ENU_SRID
 from georef.models import ReferenceFrame
-from georef.validation import run_checks
+from georef.validation import proj_versions, run_checks
 
 
 class Command(BaseCommand):
@@ -21,6 +21,8 @@ class Command(BaseCommand):
             raise CommandError(f"no reference frame with SRID {srid}") from None
 
         self.stdout.write(f"{frame}  origin {frame.origin_mark}  frozen={frame.frozen}")
+        postgis_proj, pyproj_proj = proj_versions()
+        self.stdout.write(f"PROJ: PostGIS {postgis_proj}, pyproj {pyproj_proj}")
 
         results = run_checks(srid)
         width = max(len(result.name) for result in results)

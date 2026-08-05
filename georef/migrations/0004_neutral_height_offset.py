@@ -22,11 +22,8 @@ U translation (verified: E/N shift by 2.7e-10 m).
 from django.db import migrations
 
 from georef.constants import ENU_SRID
-from georef.sql import (
-    RECOMPUTE_CAMERAS_ENU,
-    RECOMPUTE_MEASUREMENTS_ENU,
-    SPATIAL_REF_SYS_UPSERT,
-)
+from georef.crs import register_frame_crs
+from georef.sql import RECOMPUTE_CAMERAS_ENU, RECOMPUTE_MEASUREMENTS_ENU
 
 Z_OFF = 1000.0
 PREVIOUS_Z_OFF = 0.0
@@ -47,10 +44,12 @@ def _set_z_off(apps, schema_editor, value: float) -> None:
     # The generated `proj_pipeline` column recomputes itself on UPDATE.
     ReferenceFrame.objects.filter(srid=ENU_SRID).update(z_off=value)
 
+    frame.refresh_from_db()
+
     with schema_editor.connection.cursor() as cursor:
         # The ortho proj4text carries no z, but the srtext REMARK embeds the
         # pipeline and would otherwise still advertise the old zoff.
-        cursor.execute(SPATIAL_REF_SYS_UPSERT, [ENU_SRID])
+        register_frame_crs(cursor, frame)
         cursor.execute(RECOMPUTE_MEASUREMENTS_ENU, [ENU_SRID])
         cursor.execute(RECOMPUTE_CAMERAS_ENU, [ENU_SRID])
 

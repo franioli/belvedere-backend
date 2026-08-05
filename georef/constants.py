@@ -23,8 +23,6 @@ PROJECT_SRID = 32632
 # Name of the canonical frame inserted by `georef.migrations.0003`.
 BELVEDERE_FRAME_NAME = "belvedere-enu"
 
-# Semi-major axis and inverse flattening of the supported ellipsoids.
-ELLIPSOIDS: dict[str, tuple[float, float]] = {
-    "GRS80": (6378137.0, 298.257222101),
-    "WGS84": (6378137.0, 298.257223563),
-}
+# Ellipsoids offered on a frame. Their parameters are not duplicated here —
+# PROJ is the source, see `georef.enu._ellipsoid`.
+ELLIPSOID_CHOICES = ("GRS80", "WGS84")

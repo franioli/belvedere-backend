@@ -45,11 +45,28 @@ in any time difference — velocities and elevation changes are unaffected.
   the sanctioned conversions, driven by `proj_pipeline` via
   `ST_TransformPipeline`. Pipeline is geographic-first (EPSG:4979 → `+proj=cart`
   → `+proj=topocentric` → `+proj=affine`), so the frame is not tied to UTM.
-- `georef/enu.py` — independent closed-form Python implementation (Bowring),
-  used to cross-check PROJ in the tests and for Metashape/Blender exports.
-- `georef/validation.py` — the check suite (round trip, PROJ vs closed form,
-  rigid motion/scale, orthonormality, positivity, ortho caveat) shared by the
-  tests and `validate_reference_frame` / `freeze_reference_frame`.
+- `georef/enu.py` — thin **pyproj** wrappers (`to_enu`, `from_enu`,
+  `transformer_for`) plus the two radius-of-curvature formulas the checks assert
+  against. No hand-rolled geodesy: PostGIS is the production path, and this is
+  for validation and offline consumers (Metashape/Blender exports).
+- `georef/crs.py` — generates the `spatial_ref_sys` `proj4text`/`srtext` with
+  pyproj. The caveat below is injected as the CRS's PROJJSON `remarks`, so it
+  reaches QGIS as a WKT `REMARK[...]` node rather than living only in docs.
+  The proj4 string is built by hand because `CRS.to_proj4()` warns and rounds
+  the origin to 13 significant figures.
+- `georef/examples/` — worked forward/inverse examples for `cct`, SQL, pyproj
+  and Django (`README.md`), plus a standalone `enu_transform.py` that needs only
+  pyproj so it can be dropped into a Metashape or Blender script. The test suite
+  asserts its hardcoded pipeline still matches the database.
+- `georef/validation.py` — the 12-check suite shared by the tests and
+  `validate_reference_frame` / `freeze_reference_frame`. Sample points come from
+  a `generate_series` grid built in SQL. Three checks are worth knowing about:
+  **`axis_convention`** walks a known geodesic from the origin and asserts where
+  it lands — no invariant can catch an E/N swap, because `x_off == y_off`;
+  **`matches_pyproj`** proves the database's PROJ and pyproj's bundled PROJ
+  agree (they are different builds); **`materialised_up_to_date`** compares the
+  stored `geom_enu`/`location_enu` against a fresh transform, catching a frame
+  edited without a `recompute_enu`.
 
 **QGIS**: load `measurements` and pick `geom_enu` as the geometry column, then
 set the **project CRS to 990001** so QGIS does no transform at all and E/N/U
