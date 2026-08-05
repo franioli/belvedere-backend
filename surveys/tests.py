@@ -105,7 +105,7 @@ class SurveysApiTests(APITestCase):
         expected_fields = {
             "id", "point_id", "label", "is_fixed", "east", "north", "h",
             "h_orto", "lat", "lon", "survey_id", "survey_date", "survey_year",
-            "meas_date", "meas_time", "meas_strategy", "ds_east", "ds_north", "ds_h",
+            "meas_date", "meas_time", "meas_strategy", "std_east", "std_north", "std_h",
         }  # fmt: skip
         self.assertEqual(set(record), expected_fields)
         self.assertEqual(record["point_id"], 1)

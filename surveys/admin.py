@@ -184,9 +184,9 @@ class MeasurementAdmin(ImportExportMixin, gis_admin.GISModelAdmin):
                     "h_orto",
                     "lat",
                     "lon",
-                    "ds_east",
-                    "ds_north",
-                    "ds_h",
+                    "std_east",
+                    "std_north",
+                    "std_h",
                     "notes",
                     "created_at",
                 )

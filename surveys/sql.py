@@ -12,7 +12,112 @@ which keeps its own copy as the record of what was originally applied.
 
 from georef.constants import ENU_SRID, PROJECT_SRID
 
-POINTS_MEASUREMENTS_SQL = """
+#: Field descriptions, keyed by column name — unit, CRS and meaning, nothing
+#: more. QGIS renders them in a narrow column, so they stay one line.
+#:
+#: Single source for both the model fields (`db_comment=`) and the view
+#: comments below, so a column cannot be described one way on the table and
+#: another way on the view QGIS actually opens.
+COLUMN_COMMENTS: dict[str, str] = {
+    # --- measurements ---
+    "east": "Easting, m, EPSG:7791 (RDN2008 / UTM 32N).",
+    "north": "Northing, m, EPSG:7791 (RDN2008 / UTM 32N).",
+    "h": "Ellipsoidal height, m (GRS80). Not a height above sea level.",
+    "h_orto": "Orthometric height, m. Derived from h via the ITALGEO05 geoid.",
+    "lat": "Latitude, decimal degrees, WGS 84. Derived from east/north.",
+    "lon": "Longitude, decimal degrees, WGS 84. Derived from east/north.",
+    "std_east": "Standard deviation of the easting, m.",
+    "std_north": "Standard deviation of the northing, m.",
+    "std_h": "Standard deviation of the height, m.",
+    "geom": "Measurement position, EPSG:7791. Derived from east/north by trigger.",
+    "geom_enu": (
+        "Local ENU position, m (SRID 990001). Z is height above the tangent "
+        "plane at D12 plus a 1000 m offset - NOT an altitude."
+    ),
+    "meas_date": "Date the point was measured.",
+    "meas_time": "Timestamp of the measurement.",
+    "meas_strategy": "GNSS method and receiver, e.g. 'RTK SPIN3'.",
+    "datum_realization": "Reference frame realization the campaign was processed in.",
+    "height_type": "Whether h is ellipsoidal or orthometric. Ellipsoidal everywhere.",
+    "notes": "Free-text notes.",
+    # --- points ---
+    "label": "Point label, e.g. 'D12'.",
+    "is_fixed": "True for stable reference marks; false for stakes on moving ice.",
+    "active": "Whether the point is still part of the monitoring network.",
+    "ref_date": "Date the point was established.",
+    # --- surveys ---
+    "date": "Campaign date.",
+    "year": "Campaign year.",
+    "survey_date": "Campaign date.",
+    "survey_year": "Campaign year.",
+    "last_measure_date": "Date of the most recent measurement of this point.",
+    # --- movement views ---
+    "dt": "Days between the two surveys.",
+    "d_e": "Displacement east between consecutive surveys, m.",
+    "d_n": "Displacement north between consecutive surveys, m.",
+    "d_h": "Displacement in height between consecutive surveys, m.",
+    "d": "3D displacement between consecutive surveys, m.",
+    "v_e": "Velocity east, m/day.",
+    "v_n": "Velocity north, m/day.",
+    "v_h": "Vertical velocity, m/day.",
+    "v": "3D velocity magnitude, m/day.",
+    "a_e": "Acceleration east, m/day2.",
+    "a_n": "Acceleration north, m/day2.",
+    "a_h": "Vertical acceleration, m/day2.",
+    "a": "3D acceleration magnitude, m/day2.",
+    "survey_date_fin": "Date of the later survey of the pair.",
+    "survey_date_prev": "Date of the earlier survey of the pair.",
+    "east_fin": "Easting at the later survey, m, EPSG:7791.",
+    "north_fin": "Northing at the later survey, m, EPSG:7791.",
+    "h_fin": "Ellipsoidal height at the later survey, m.",
+    "east_prev": "Easting at the earlier survey, m, EPSG:7791.",
+    "north_prev": "Northing at the earlier survey, m, EPSG:7791.",
+    "h_prev": "Ellipsoidal height at the earlier survey, m.",
+}
+
+TABLE_COMMENTS: dict[str, str] = {
+    "measurements": "One GNSS measurement of a point during a survey campaign.",
+    "points": "Monitoring points: stakes on the glacier and fixed reference marks.",
+    "surveys": "Survey campaigns.",
+}
+
+
+def comment_columns(
+    relation: str, columns: tuple[str, ...], *, drop: bool = False
+) -> str:
+    """`COMMENT ON COLUMN` for the columns of a table or view.
+
+    Views do not inherit column comments from their base tables, and dropping
+    a view drops its comments — so this is appended to the view DDL and
+    reapplied on every rebuild.
+    """
+    statements = [
+        "COMMENT ON COLUMN public.{}.{} IS {};".format(
+            relation, column, "NULL" if drop else _quote(COLUMN_COMMENTS[column])
+        )
+        for column in columns
+        if column in COLUMN_COMMENTS
+    ]
+    return "\n".join(statements) + "\n"
+
+
+def comment_table(table: str, *, drop: bool = False) -> str:
+    value = "NULL" if drop else _quote(TABLE_COMMENTS[table])
+    return f"COMMENT ON TABLE public.{table} IS {value};\n"
+
+
+def _quote(value: str) -> str:
+    return "'" + value.replace("'", "''") + "'"
+
+
+#: Prefix of the standard-deviation columns. They were `ds_*` until
+#: `surveys/0024`, so the view DDL is parameterised: migrations that predate the
+#: rename pass the old prefix and still build on a fresh database.
+SIGMA_PREFIX = "std"
+
+
+def points_measurements_sql(sigma: str = SIGMA_PREFIX) -> str:
+    return f"""
 CREATE OR REPLACE VIEW public.points_measurements AS
  SELECT meas.id,
     meas.geom,
@@ -31,14 +136,15 @@ CREATE OR REPLACE VIEW public.points_measurements AS
     meas.meas_date,
     meas.meas_time,
     meas.meas_strategy,
-    meas.ds_east,
-    meas.ds_north,
-    meas.ds_h
+    meas.{sigma}_east,
+    meas.{sigma}_north,
+    meas.{sigma}_h
    FROM measurements meas
      JOIN surveys sur ON meas.survey = sur.id
      JOIN points pts ON meas.point = pts.id
   ORDER BY sur.year DESC, pts.label;
 """
+
 
 POINTS_MOVEMENT_RAW_SQL = """
 CREATE OR REPLACE VIEW public.points_movement_raw AS
@@ -151,13 +257,50 @@ CREATE OR REPLACE VIEW public.active_points AS
   WHERE row_num = 1;
 """
 
-#: Dependency order: the movement views read `points_measurements`.
-CREATE_VIEWS = (
-    POINTS_MEASUREMENTS_SQL
-    + POINTS_MOVEMENT_RAW_SQL
-    + POINTS_MOVEMENT_FILTERED_SQL
-    + ACTIVE_POINTS_SQL
-)
+
+#: Columns each view exposes, for the comments below.
+def points_measurements_columns(sigma: str = SIGMA_PREFIX) -> tuple[str, ...]:
+    return (
+        "geom", "label", "is_fixed", "east", "north", "h_orto", "lat", "lon", "h",
+        "survey_date", "survey_year", "meas_date", "meas_time", "meas_strategy",
+        f"{sigma}_east", f"{sigma}_north", f"{sigma}_h",
+    )  # fmt: skip
+
+
+POINTS_MOVEMENT_COLUMNS = (
+    "geom", "label", "survey_year", "is_fixed", "survey_date_fin",
+    "survey_date_prev", "dt", "east_fin", "north_fin", "h_fin", "east_prev",
+    "north_prev", "h_prev", "d_e", "d_n", "d_h", "d", "v_e", "v_n", "v_h", "v",
+    "a_e", "a_n", "a_h", "a",
+)  # fmt: skip
+
+ACTIVE_POINTS_COLUMNS = (
+    "geom", "label", "last_measure_date", "east", "north", "h", "is_fixed",
+)  # fmt: skip
+
+
+def create_views(sigma: str = SIGMA_PREFIX) -> str:
+    """View DDL plus column comments, in dependency order.
+
+    The comments follow each definition rather than living in a separate
+    migration, because dropping a view drops its comments — this way a rebuild
+    never leaves QGIS without field metadata.
+
+    `sigma` exists for migrations that predate the `ds_*` -> `std_*` rename.
+    """
+    return (
+        points_measurements_sql(sigma)
+        + comment_columns("points_measurements", points_measurements_columns(sigma))
+        + POINTS_MOVEMENT_RAW_SQL
+        + comment_columns("points_movement_raw", POINTS_MOVEMENT_COLUMNS)
+        + POINTS_MOVEMENT_FILTERED_SQL
+        + comment_columns("points_movement_filtered", POINTS_MOVEMENT_COLUMNS)
+        + ACTIVE_POINTS_SQL
+        + comment_columns("active_points", ACTIVE_POINTS_COLUMNS)
+    )
+
+
+CREATE_VIEWS = create_views()
 
 #: Reverse order, so nothing is dropped while still depended on.
 DROP_VIEWS = """

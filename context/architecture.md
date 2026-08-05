@@ -32,6 +32,33 @@ never a literal.
 `scatter_points` / `scatter_measurements` remain on 32632 — legacy, kept for
 reference, outside Django.
 
+## Field metadata in QGIS
+
+Field descriptions live in **Postgres column comments**, which QGIS shows in Layer
+Properties → Fields and as attribute-form tooltips. They come from `db_comment`
+on the model fields and `Meta.db_table_comment`, so they stay migration-managed.
+
+**Views do not inherit column comments from base tables, and dropping a view drops
+its comments.** Since the QGIS layers *are* the views, `surveys/sql.py` emits
+`COMMENT ON COLUMN` for each view immediately after its `CREATE OR REPLACE VIEW`,
+inside `create_views()`. Any future view rebuild therefore keeps its metadata —
+never add view DDL that bypasses that function.
+
+`COLUMN_COMMENTS` in `surveys/sql.py` is the single source for both the table and
+the view wording, so a column cannot be described one way on `measurements` and
+another way on `points_measurements`.
+
+**`ds_*` → `std_*` (August 2026).** They are standard deviations in metres, but the
+name invited confusion with the displacements in `points_movement_*`. Renamed in
+`surveys/0024`, which drops and recreates the views — `CREATE OR REPLACE VIEW`
+cannot rename an output column. This **broke the `/surveys/measurements/` response**
+(`std_east` etc.); the web-map was updated in the same release, so backend and
+website must deploy together. CSV import still accepts `ds_*` headers.
+
+`surveys/0025` cleared the 2026 standard deviations: that campaign was entered with
+displacements (30 of its 31 non-null rows were negative, impossible for a sigma).
+2015–2025 are clean.
+
 ## Apps
 
 ### `georef` — local reference frames

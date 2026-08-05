@@ -3,18 +3,23 @@ import os
 from django.contrib.gis.db import models
 
 from georef.constants import ENU_SRID, PROJECT_SRID
+from surveys.sql import COLUMN_COMMENTS as DOC
+from surveys.sql import TABLE_COMMENTS
 
 # ================ Survey and Instrument Models ================
 
 
 class Survey(models.Model):
     id = models.AutoField(primary_key=True)
-    date = models.DateField(blank=True, null=True)
-    year = models.BigIntegerField(blank=True, null=True)
-    notes = models.CharField(max_length=254, blank=True, null=True)
+    date = models.DateField(blank=True, null=True, db_comment=DOC["date"])
+    year = models.BigIntegerField(blank=True, null=True, db_comment=DOC["year"])
+    notes = models.CharField(
+        max_length=254, blank=True, null=True, db_comment=DOC["notes"]
+    )
 
     class Meta:
         db_table = "surveys"
+        db_table_comment = TABLE_COMMENTS["surveys"]
 
     def __str__(self):
         return f"Survey {self.id} - {self.date}"
@@ -96,15 +101,20 @@ class Flight(models.Model):
 
 class Point(models.Model):
     id = models.AutoField(primary_key=True)
-    label = models.CharField(max_length=45, blank=True, null=True)
-    active = models.BooleanField(blank=True, null=True)
-    is_fixed = models.BooleanField(blank=True, null=True)
-    ref_date = models.DateField(blank=True, null=True)
-    notes = models.CharField(max_length=512, blank=True, null=True)
+    label = models.CharField(
+        max_length=45, blank=True, null=True, db_comment=DOC["label"]
+    )
+    active = models.BooleanField(blank=True, null=True, db_comment=DOC["active"])
+    is_fixed = models.BooleanField(blank=True, null=True, db_comment=DOC["is_fixed"])
+    ref_date = models.DateField(blank=True, null=True, db_comment=DOC["ref_date"])
+    notes = models.CharField(
+        max_length=512, blank=True, null=True, db_comment=DOC["notes"]
+    )
     created_at = models.DateTimeField(auto_now_add=True, null=True)
 
     class Meta:
         db_table = "points"
+        db_table_comment = TABLE_COMMENTS["points"]
 
     def __str__(self):
         return f"Point {self.label} (ID {self.id})"
@@ -112,22 +122,34 @@ class Point(models.Model):
 
 class Measurement(models.Model):
     id = models.AutoField(primary_key=True)
-    geom = models.PointField(srid=PROJECT_SRID, blank=True, null=True)
-    east = models.FloatField()
-    north = models.FloatField()
-    h = models.FloatField(verbose_name="h (ellipsoidal)")
+    geom = models.PointField(
+        srid=PROJECT_SRID, blank=True, null=True, db_comment=DOC["geom"]
+    )
+    east = models.FloatField(db_comment=DOC["east"])
+    north = models.FloatField(db_comment=DOC["north"])
+    h = models.FloatField(verbose_name="h (ellipsoidal)", db_comment=DOC["h"])
     point = models.ForeignKey(Point, models.DO_NOTHING, db_column="point")
     survey = models.ForeignKey(Survey, models.DO_NOTHING, db_column="survey")
-    meas_date = models.DateField(blank=True, null=True)
-    ds_east = models.FloatField(blank=True, null=True)
-    ds_north = models.FloatField(blank=True, null=True)
-    ds_h = models.FloatField(blank=True, null=True)
-    meas_strategy = models.CharField(max_length=25, blank=True, null=True)
-    meas_time = models.DateTimeField(blank=True, null=True)
-    notes = models.CharField(max_length=250, blank=True, null=True)
-    lat = models.FloatField(blank=True, null=True)
-    lon = models.FloatField(blank=True, null=True)
-    h_orto = models.FloatField(blank=True, null=True)
+    meas_date = models.DateField(blank=True, null=True, db_comment=DOC["meas_date"])
+    std_east = models.FloatField(
+        blank=True, null=True, verbose_name="std east", db_comment=DOC["std_east"]
+    )
+    std_north = models.FloatField(
+        blank=True, null=True, verbose_name="std north", db_comment=DOC["std_north"]
+    )
+    std_h = models.FloatField(
+        blank=True, null=True, verbose_name="std h", db_comment=DOC["std_h"]
+    )
+    meas_strategy = models.CharField(
+        max_length=25, blank=True, null=True, db_comment=DOC["meas_strategy"]
+    )
+    meas_time = models.DateTimeField(blank=True, null=True, db_comment=DOC["meas_time"])
+    notes = models.CharField(
+        max_length=250, blank=True, null=True, db_comment=DOC["notes"]
+    )
+    lat = models.FloatField(blank=True, null=True, db_comment=DOC["lat"])
+    lon = models.FloatField(blank=True, null=True, db_comment=DOC["lon"])
+    h_orto = models.FloatField(blank=True, null=True, db_comment=DOC["h_orto"])
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     geom_enu = models.PointField(
         dim=3,
@@ -139,6 +161,7 @@ class Measurement(models.Model):
             "Position in the local ENU frame, filled by a database trigger "
             "from east/north/h. Read-only: edit the source coordinates instead."
         ),
+        db_comment=DOC["geom_enu"],
     )
 
     # A realization mismatch between campaigns would look exactly like glacier
@@ -154,6 +177,7 @@ class Measurement(models.Model):
             ("ITRF2014", "ITRF2014"),
         ],
         help_text="Reference frame realization the campaign was processed in.",
+        db_comment=DOC["datum_realization"],
     )
     height_type = models.CharField(
         max_length=16,
@@ -161,10 +185,12 @@ class Measurement(models.Model):
         null=True,
         choices=[("ellipsoidal", "ellipsoidal"), ("orthometric", "orthometric")],
         help_text="Should be 'ellipsoidal' everywhere; h_orto is computed internally from h using ITALGEO05 geoid model.",
+        db_comment=DOC["height_type"],
     )
 
     class Meta:
         db_table = "measurements"
+        db_table_comment = TABLE_COMMENTS["measurements"]
 
     def __str__(self):
         return (
@@ -346,9 +372,9 @@ class PointsMeasurement(models.Model):
     meas_date = models.DateField(null=True)
     meas_time = models.DateTimeField(null=True)
     meas_strategy = models.CharField(max_length=25, null=True)
-    ds_east = models.FloatField(null=True)
-    ds_north = models.FloatField(null=True)
-    ds_h = models.FloatField(null=True)
+    std_east = models.FloatField(null=True)
+    std_north = models.FloatField(null=True)
+    std_h = models.FloatField(null=True)
 
     class Meta:
         managed = False

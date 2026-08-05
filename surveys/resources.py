@@ -35,9 +35,9 @@ class MeasurementResource(resources.ModelResource):
             "h",
             "meas_date",
             "notes",
-            "ds_east",
-            "ds_north",
-            "ds_h",
+            "std_east",
+            "std_north",
+            "std_h",
             "meas_strategy",
             "lat",
             "lon",
@@ -127,9 +127,9 @@ class MeasurementResource(resources.ModelResource):
         row["survey"] = survey.pk
 
         row["notes"] = row.get("notes") or ""
-        row["ds_east"] = row.get("ds_east") or None
-        row["ds_north"] = row.get("ds_north") or None
-        row["ds_h"] = row.get("ds_h") or None
+        # Renamed from ds_* in August 2026; older CSV templates still work.
+        for axis in ("east", "north", "h"):
+            row[f"std_{axis}"] = row.get(f"std_{axis}") or row.get(f"ds_{axis}") or None
         row["meas_strategy"] = row.get("meas_strategy") or ""
         row["lat"] = row.get("lat") or None
         row["lon"] = row.get("lon") or None

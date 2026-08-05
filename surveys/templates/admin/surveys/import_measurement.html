@@ -39,7 +39,7 @@
     <li><code>meas_date</code> — measurement date (YYYY-MM-DD)</li>
     <li><code>meas_strategy</code> — strategy string (max 25 chars)</li>
     <li><code>notes</code> — free text (max 250 chars)</li>
-    <li><code>ds_east</code>, <code>ds_north</code>, <code>ds_h</code> — coordinate standard deviations (float)</li>
+    <li><code>std_east</code>, <code>std_north</code>, <code>std_h</code> — coordinate standard deviations in metres (float). Older templates using <code>ds_east</code>/<code>ds_north</code>/<code>ds_h</code> are still accepted.</li>
     <li><code>lat</code>, <code>lon</code>, <code>h_orto</code> — normally computed by the DB trigger on save; supply
       only to override</li>
   </ul>

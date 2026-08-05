@@ -19,13 +19,17 @@ from django.db import migrations
 
 from georef.constants import PROJECT_SRID
 from surveys.sql import (
-    CREATE_VIEWS,
     DROP_VIEWS,
     compute_measurement_geometry,
+    create_views,
     measurements_fill_geom_enu,
 )
 
 PREVIOUS_SRID = 32632
+
+# This migration predates the ds_* -> std_* rename in surveys/0024, so on a
+# fresh database the sigma columns are still named ds_* when it runs.
+LEGACY_SIGMA_PREFIX = "ds"
 
 
 def retag(srid: int) -> str:
@@ -36,7 +40,7 @@ ALTER TABLE measurements
     ALTER COLUMN geom TYPE geometry(Point, {srid})
     USING ST_SetSRID(geom, {srid});
 
-{CREATE_VIEWS}
+{create_views(LEGACY_SIGMA_PREFIX)}
 {compute_measurement_geometry(srid)}
 {measurements_fill_geom_enu(srid)}
 """
