@@ -98,6 +98,32 @@ design; the notes that matter for migrations:
 **Rule going forward:** a frozen frame is never updated. Corrections mean a new
 row with a new SRID and a new geometry column.
 
+## Datum correction: 32632 → 7791 (August 2026)
+
+Migrations `surveys/0022–0023`, `image_index/0010`, `georef/0006` re-tag every
+geometry as **EPSG:7791** (RDN2008 / UTM 32N). See `architecture.md` for why.
+
+- `surveys/0022` — `SeparateDatabaseAndState` is **required**: Django's own
+  `AlterField` emits `USING geom::geometry(POINT,7791)`, which PostGIS rejects
+  because the cast does not re-tag the SRID. The explicit DDL uses
+  `USING ST_SetSRID(geom, 7791)` — a re-tag, not a re-projection.
+  The four views must be dropped first (Postgres refuses `ALTER COLUMN TYPE`
+  while a view depends on the column) and recreated after; their DDL now lives
+  in `surveys/sql.py` so it has a single home.
+- **`compute_measurement_geometry()` is now migration-managed**, and gained two
+  fixes it needed anyway: it samples the geoid in the *raster's* SRID (the
+  raster is 32632 while measurements are 7791 — mixing them would fail every
+  insert) and skips the geoid when `raster.geoid_model` is absent, which is the
+  case on test databases.
+- `surveys/0023` — `datum_realization` and `height_type` on `Measurement`,
+  backfilled `RDN2008` / `ellipsoidal`. Deliberately only two columns: the SRID
+  is already on `geom`, and an observation epoch would be NULL on every row
+  because RDN2008 is plate-fixed.
+- `georef/0006` — moves the ENU pipeline onto EPSG:6705, re-derives the frame
+  origin as RDN2008, sets `base_srid`/`datum_epoch`, regenerates
+  `spatial_ref_sys` and recomputes both materialised columns. ENU coordinates
+  move ~0.12 mm.
+
 ### Rolling back
 
 Nothing here overwrites existing data — `east`/`north`/`h`, `geom`, `location`

@@ -2,7 +2,7 @@ import os
 
 from django.contrib.gis.db import models
 
-from georef.constants import ENU_SRID
+from georef.constants import ENU_SRID, PROJECT_SRID
 
 # ================ Survey and Instrument Models ================
 
@@ -112,7 +112,7 @@ class Point(models.Model):
 
 class Measurement(models.Model):
     id = models.AutoField(primary_key=True)
-    geom = models.PointField(srid=32632, blank=True, null=True)
+    geom = models.PointField(srid=PROJECT_SRID, blank=True, null=True)
     east = models.FloatField()
     north = models.FloatField()
     h = models.FloatField(verbose_name="h (ellipsoidal)")
@@ -139,6 +139,28 @@ class Measurement(models.Model):
             "Position in the local ENU frame, filled by a database trigger "
             "from east/north/h. Read-only: edit the source coordinates instead."
         ),
+    )
+
+    # A realization mismatch between campaigns would look exactly like glacier
+    # motion, so it is recorded rather than assumed. The SRID is not stored —
+    # `geom` already carries it.
+    datum_realization = models.CharField(
+        max_length=32,
+        blank=True,
+        null=True,
+        choices=[
+            ("RDN2008", "RDN2008 (ETRF2000, epoch 2008.0)"),
+            ("ETRF2000", "ETRF2000"),
+            ("ITRF2014", "ITRF2014"),
+        ],
+        help_text="Reference frame realization the campaign was processed in.",
+    )
+    height_type = models.CharField(
+        max_length=16,
+        blank=True,
+        null=True,
+        choices=[("ellipsoidal", "ellipsoidal"), ("orthometric", "orthometric")],
+        help_text="Should be 'ellipsoidal' everywhere; h_orto is computed internally from h using ITALGEO05 geoid model.",
     )
 
     class Meta:

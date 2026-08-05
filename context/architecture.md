@@ -9,6 +9,29 @@ One PostgreSQL/PostGIS database (`belvedere`), single `public` schema, fully
 Django-managed (see `django-migration-status.md`). Never split into separate
 databases.
 
+## Coordinate reference systems
+
+**Project CRS: EPSG:7791** — RDN2008 / UTM zone 32N, the Italian realization of
+ETRF2000 at epoch 2008.0, on GRS80 with E-N axis order. Everything measured
+against the Italian permanent network lands here.
+
+It is deliberately **not EPSG:32632**, which the database used until August
+2026. That code names the WGS 84 datum *ensemble*, whose declared accuracy is
+2 m — a meaningless claim over centimetre GNSS. The coordinates are byte-for-byte
+the same either way (PROJ treats RDN2008 → WGS 84 as a null transform, so the
+correction moved the ENU results by 0.12 mm, purely the GRS80/WGS84 ellipsoid
+difference). The label matters downstream: WGS 84 ≈ ITRF has drifted ~45 cm from
+ETRF2000 since 2008.0, and a realization mismatch between campaigns would
+masquerade as glacier motion. `measurements.datum_realization` and `height_type`
+record the realization per row so any future exception is visible.
+
+Companion codes, all RDN2008: **6705** geographic 3D (what the ENU pipeline
+consumes), **6706** geographic 2D. Use `georef.constants.PROJECT_SRID` in code,
+never a literal.
+
+`scatter_points` / `scatter_measurements` remain on 32632 — legacy, kept for
+reference, outside Django.
+
 ## Apps
 
 ### `georef` — local reference frames

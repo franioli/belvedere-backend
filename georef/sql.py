@@ -8,7 +8,39 @@ drift apart.
 Each statement takes the frame SRID as its single parameter.
 """
 
-from georef.constants import PROJECT_SRID
+from georef.constants import GEOGRAPHIC_3D_SRID, PROJECT_SRID
+
+
+def transform_functions(geographic_3d_srid: int = GEOGRAPHIC_3D_SRID) -> str:
+    """The sanctioned ENU conversions, driven by the frame's generated pipeline.
+
+    Parameterised on the geographic 3D CRS the pipeline consumes, because that
+    changed with the datum correction (4979 -> 6705) so the chain stays inside
+    RDN2008 and never crosses a datum. Originally created in `georef/0002`.
+    """
+    return f"""
+CREATE OR REPLACE FUNCTION georef_to_enu(geom geometry, target_srid integer)
+RETURNS geometry AS $$
+    SELECT ST_TransformPipeline(
+        ST_Transform(ST_Force3D($1), {geographic_3d_srid}),
+        f.proj_pipeline,
+        f.srid
+    )
+    FROM georef_reference_frame f
+    WHERE f.srid = $2 AND $1 IS NOT NULL;
+$$ LANGUAGE sql STABLE;
+
+CREATE OR REPLACE FUNCTION georef_from_enu(geom geometry, out_srid integer)
+RETURNS geometry AS $$
+    SELECT ST_Transform(
+        ST_InverseTransformPipeline($1, f.proj_pipeline, {geographic_3d_srid}),
+        $2
+    )
+    FROM georef_reference_frame f
+    WHERE f.srid = ST_SRID($1) AND $1 IS NOT NULL;
+$$ LANGUAGE sql STABLE;
+"""
+
 
 #: Rebuild the `spatial_ref_sys` row. DML on a PostGIS-owned table — no DDL.
 #: Parameters: srid, srid, proj4text, srtext — the last two from

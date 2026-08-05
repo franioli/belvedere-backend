@@ -20,7 +20,7 @@ from georef.enu import gaussian_radius, geod_for, prime_vertical_radius, to_enu
 from georef.models import ReferenceFrame
 from georef.sql import SPATIAL_REF_SYS_SELECT
 
-#: Bounding box of the survey area in EPSG:32632, padded around the real data
+#: Bounding box of the survey area in the project CRS, padded around the data
 #: extent (E 415327–416659, N 5087986–5091322, h 1832–2292).
 SAMPLE_BOUNDS = {
     "east": (415300.0, 416700.0),
@@ -433,16 +433,17 @@ def check_pipeline_route_equivalence(frame: ReferenceFrame) -> CheckResult:
     """Geographic-first pipeline vs. one that inverts UTM itself.
 
     Guards the decision to keep the frame independent of UTM: the `to_enu`
-    route goes through `ST_Transform(..., 4979)`, which for EPSG:32632 is a
-    pure inverse projection with no datum shift.
+    route goes through `ST_Transform(..., 6705)`, which for EPSG:7791 is a pure
+    inverse projection — same datum, same ellipsoid, no shift.
 
-    The inverse-UTM step must use WGS84, the ellipsoid EPSG:32632 is actually
-    defined on. Using the frame's GRS80 here instead measures the GRS80/WGS84
-    ellipsoid difference (~0.12 mm) rather than the thing under test.
+    Both routes use GRS80, the ellipsoid RDN2008 is defined on, so this now
+    agrees to ~1e-9 m. Under the old EPSG:32632 label it could only reach
+    0.12 mm, because the inverse-UTM step had to use WGS84 and the two
+    ellipsoids differ.
     """
     utm_pipeline = frame.proj_pipeline.replace(
         "+proj=pipeline",
-        "+proj=pipeline +step +inv +proj=utm +zone=32 +ellps=WGS84",
+        f"+proj=pipeline +step +inv +proj=utm +zone=32 +ellps={frame.ellps}",
         1,
     )
     with connection.cursor() as cursor:

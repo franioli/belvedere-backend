@@ -1,23 +1,25 @@
 #!/usr/bin/env python3
-"""Convert between the Belvedere local ENU frame and UTM 32N / geographic.
+"""Convert between the Belvedere local ENU frame and RDN2008 / UTM 32N.
 
 Standalone on purpose: it needs only `pyproj`, no Django and no database, so
 it can be copied into a Metashape or Blender script, or run from a shell.
 
-    # UTM 32N (east north h) -> ENU
+    # RDN2008 / UTM 32N (east north h) -> ENU
     echo "416125.449 5089423.209 2121.172" | python enu_transform.py
 
     # ENU -> UTM 32N
     echo "10000 10000 1000" | python enu_transform.py --inverse
 
     # geographic (lon lat h) instead of UTM, from arguments
-    python enu_transform.py --geographic 7.917710693886419 45.95325462701091 2121.172
+    python enu_transform.py --geographic 7.917710693874493 45.95325462809565 2121.172
 
     # check the frame is the one this file documents
     python enu_transform.py --self-test
 
-Heights are **ellipsoidal**, never orthometric. ENU Z carries the frame's
-+1000 m neutral offset and is not an altitude — see context/architecture.md.
+The project CRS is **EPSG:7791** (RDN2008 / UTM 32N, ETRF2000 epoch 2008.0),
+not WGS 84. Heights are **ellipsoidal**, never orthometric. ENU Z carries the
+frame's +1000 m neutral offset and is not an altitude — see
+context/architecture.md.
 """
 
 import argparse
@@ -33,15 +35,15 @@ PIPELINE = (
     "+proj=pipeline "
     "+step +proj=cart +ellps=GRS80 "
     "+step +proj=topocentric +ellps=GRS80 "
-    "+lat_0=45.95325462701091 +lon_0=7.917710693886419 +h_0=2121.172 "
+    "+lat_0=45.95325462809565 +lon_0=7.917710693874493 +h_0=2121.172 "
     "+step +proj=affine +xoff=10000 +yoff=10000 +zoff=1000"
 )
 
-#: Same frame, but consuming UTM 32N directly. The inverse UTM step uses WGS84
-#: because that is the ellipsoid EPSG:32632 is defined on; the rest stays GRS80.
+#: Same frame, consuming RDN2008 / UTM 32N (EPSG:7791) directly. GRS80
+#: throughout — RDN2008's ellipsoid — so no step crosses a datum.
 PIPELINE_FROM_UTM = PIPELINE.replace(
     "+proj=pipeline",
-    "+proj=pipeline +step +inv +proj=utm +zone=32 +ellps=WGS84",
+    "+proj=pipeline +step +inv +proj=utm +zone=32 +ellps=GRS80",
     1,
 )
 

@@ -4,15 +4,14 @@ from django.db import migrations, models
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
-        ('surveys', '0020_measurement_geom_enu'),
+        ("surveys", "0020_measurement_geom_enu"),
     ]
 
     operations = [
         migrations.AlterField(
-            model_name='measurement',
-            name='h',
-            field=models.FloatField(verbose_name='h (ellipsoidal)'),
+            model_name="measurement",
+            name="h",
+            field=models.FloatField(verbose_name="h (ellipsoidal)"),
         ),
     ]
