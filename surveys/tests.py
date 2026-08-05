@@ -328,7 +328,7 @@ class PointDeletionTests(TestCase):
         request = RequestFactory().post("/admin/surveys/point/")
         request.user = None
         # message_user needs a message store; the plain request has none
-        setattr(request, "_messages", type("S", (), {"add": lambda *a, **k: None})())
+        request._messages = type("S", (), {"add": lambda *a, **k: None})()
 
         admin_instance = PointAdmin(Point, AdminSite())
         admin_instance.delete_with_measurements(
